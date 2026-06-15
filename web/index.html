@@ -1,0 +1,943 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI Gym Trainer</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0b0f1c;
+      --panel: #141a2c;
+      --panel-2: #1b2236;
+      --accent: #5b8cff;
+      --accent-2: #38d39f;
+      --accent-grad: linear-gradient(135deg, #5b8cff, #7a5bff);
+      --text: #eef1fb;
+      --muted: #9aa3bd;
+      --user: linear-gradient(135deg, #2f4cff, #6a3bff);
+      --bot: #1b2236;
+      --danger: #ff6b6b;
+      --line: rgba(255, 255, 255, 0.08);
+      --shadow: 0 30px 80px rgba(0, 0, 0, 0.55);
+    }
+
+    body {
+      font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
+      background:
+        radial-gradient(900px 500px at 12% -5%, rgba(91, 140, 255, 0.18), transparent 60%),
+        radial-gradient(900px 500px at 100% 0%, rgba(56, 211, 159, 0.12), transparent 55%),
+        radial-gradient(1000px 700px at 50% 120%, rgba(122, 91, 255, 0.14), transparent 60%),
+        var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 28px;
+    }
+
+    .chat {
+      width: 100%;
+      max-width: 1040px;
+      height: calc(100vh - 56px);
+      max-height: 940px;
+      background: linear-gradient(180deg, rgba(27, 34, 54, 0.72), rgba(20, 26, 44, 0.92));
+      backdrop-filter: blur(14px);
+      border: 1px solid var(--line);
+      border-radius: 24px;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      box-shadow: var(--shadow);
+    }
+
+    .chat-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 18px 26px;
+      background: linear-gradient(135deg, rgba(91, 140, 255, 0.16), rgba(122, 91, 255, 0.10));
+      border-bottom: 1px solid var(--line);
+    }
+
+    .brand { display: flex; align-items: center; gap: 14px; }
+
+    .avatar {
+      width: 46px;
+      height: 46px;
+      border-radius: 14px;
+      display: grid;
+      place-items: center;
+      font-size: 22px;
+      background: var(--accent-grad);
+      box-shadow: 0 8px 22px rgba(91, 140, 255, 0.45);
+      flex-shrink: 0;
+    }
+
+    .chat-header h1 { font-size: 19px; font-weight: 700; letter-spacing: 0.2px; }
+    .chat-header .tagline { margin-top: 2px; font-size: 12.5px; color: var(--muted); }
+
+    .header-right { display: flex; align-items: center; gap: 10px; }
+
+    .nav-btn {
+      cursor: pointer;
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.04);
+      color: var(--text);
+      border-radius: 999px;
+      padding: 8px 15px;
+      font-size: 13px;
+      font-weight: 600;
+      font-family: inherit;
+      transition: border-color 0.15s ease, background 0.15s ease, transform 0.12s ease;
+    }
+    .nav-btn:hover { transform: translateY(-1px); border-color: var(--accent); }
+    .nav-btn.active { background: rgba(91, 140, 255, 0.18); border-color: var(--accent); color: #fff; }
+    .nav-btn.ghost { color: var(--muted); }
+
+    .status-pill {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--muted);
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 6px 13px;
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      white-space: nowrap;
+    }
+    .status-pill::before { content: ''; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+    .status-pill.ok { color: var(--accent-2); }
+    .status-pill.ok::before { background: var(--accent-2); box-shadow: 0 0 8px var(--accent-2); }
+    .status-pill.error { color: var(--danger); }
+    .status-pill.error::before { background: var(--danger); }
+
+    /* ---- Views ---- */
+    .view { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+    .view[hidden] { display: none; }
+
+    .messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 26px clamp(18px, 5vw, 60px);
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    .messages::-webkit-scrollbar { width: 10px; }
+    .messages::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.12);
+      border-radius: 10px; border: 3px solid transparent; background-clip: padding-box;
+    }
+    .messages::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.2); background-clip: padding-box; }
+
+    .msg { display: flex; animation: rise 0.28s ease both; }
+    .msg.user { justify-content: flex-end; }
+
+    @keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+
+    .bubble {
+      max-width: 82%;
+      padding: 14px 17px;
+      border-radius: 16px;
+      font-size: 14.5px;
+      line-height: 1.55;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+      box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
+    }
+    .msg.bot .bubble { background: var(--bot); border: 1px solid var(--line); border-top-left-radius: 5px; }
+    .msg.user .bubble { background: var(--user); color: #fff; border-top-right-radius: 5px; box-shadow: 0 8px 22px rgba(91, 80, 255, 0.35); }
+    .bubble .who { display: block; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.7px; opacity: 0.75; margin-bottom: 6px; }
+
+    .welcome { margin: auto; text-align: center; max-width: 560px; padding: 20px; animation: rise 0.4s ease both; }
+    .welcome .hero-emoji { font-size: 46px; filter: drop-shadow(0 6px 16px rgba(91, 140, 255, 0.4)); }
+    .welcome h2 {
+      margin-top: 12px; font-size: 24px; font-weight: 800;
+      background: linear-gradient(135deg, #fff, #b9c6ff);
+      -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+    }
+    .welcome p { margin-top: 8px; color: var(--muted); font-size: 14px; line-height: 1.6; }
+    .chips { margin-top: 20px; display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; }
+    .chip {
+      cursor: pointer; border: 1px solid var(--line); background: rgba(255, 255, 255, 0.04);
+      color: var(--text); border-radius: 999px; padding: 9px 16px; font-size: 13px; font-weight: 500;
+      transition: transform 0.12s ease, border-color 0.15s ease, background 0.15s ease;
+    }
+    .chip:hover { transform: translateY(-2px); border-color: var(--accent); background: rgba(91, 140, 255, 0.14); }
+
+    .exercises { margin-top: 14px; display: flex; flex-direction: column; gap: 12px; }
+    .exercise {
+      position: relative;
+      background: linear-gradient(180deg, rgba(91, 140, 255, 0.06), rgba(255, 255, 255, 0.02));
+      border: 1px solid var(--line); border-radius: 14px; padding: 14px 15px;
+      transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+    }
+    .exercise:hover { transform: translateY(-2px); border-color: rgba(91, 140, 255, 0.5); box-shadow: 0 12px 28px rgba(0, 0, 0, 0.28); }
+    .exercise strong { font-size: 14.5px; font-weight: 700; }
+    .exercise .tag { font-style: normal; color: var(--accent); font-size: 11.5px; font-weight: 600; margin-left: 6px; }
+    .exercise .meta { display: block; font-size: 12px; color: var(--muted); margin-top: 3px; text-transform: capitalize; }
+    .exercise .ex-target {
+      display: inline-block; margin-top: 8px; font-size: 11.5px; font-weight: 600; color: var(--accent-2);
+      background: rgba(56, 211, 159, 0.12); border: 1px solid rgba(56, 211, 159, 0.25); border-radius: 999px; padding: 3px 11px;
+    }
+    .ex-media { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 12px; }
+    .ex-img { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: 10px; background: #0d1117; border: 1px solid var(--line); transition: transform 0.2s ease; }
+    .ex-img:hover { transform: scale(1.02); }
+    .ex-steps { margin: 12px 0 0; padding-left: 20px; display: flex; flex-direction: column; gap: 7px; }
+    .ex-steps li { font-size: 13px; line-height: 1.5; color: var(--text); }
+    .ex-steps li::marker { color: var(--accent); font-weight: 700; }
+
+    .typing { color: var(--muted); font-style: italic; }
+    .typing::after { content: ''; display: inline-block; width: 1.2em; text-align: left; animation: dots 1.2s steps(4, end) infinite; }
+    @keyframes dots { 0% { content: ''; } 25% { content: '.'; } 50% { content: '..'; } 75% { content: '...'; } }
+
+    .composer { display: flex; gap: 12px; padding: 18px clamp(18px, 5vw, 60px); border-top: 1px solid var(--line); background: rgba(11, 15, 28, 0.45); }
+    .composer input {
+      flex: 1; background: var(--panel); border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 14px;
+      padding: 15px 17px; color: var(--text); font-size: 15px; outline: none;
+      transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    }
+    .composer input::placeholder { color: var(--muted); }
+    .composer input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(91, 140, 255, 0.18); }
+    .composer button {
+      background: var(--accent-grad); color: white; border: none; border-radius: 14px; padding: 0 26px;
+      font-size: 15px; font-weight: 700; cursor: pointer; font-family: inherit;
+      transition: transform 0.12s ease, box-shadow 0.15s ease, opacity 0.15s ease;
+      box-shadow: 0 8px 20px rgba(91, 140, 255, 0.35);
+    }
+    .composer button:hover { transform: translateY(-1px); box-shadow: 0 12px 26px rgba(91, 140, 255, 0.45); }
+    .composer button:active { transform: translateY(0); }
+    .composer button:disabled { opacity: 0.5; cursor: not-allowed; transform: none; box-shadow: none; }
+    .composer .mic {
+      background: var(--panel); color: var(--text); border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 14px; padding: 0 16px; display: inline-flex; align-items: center; justify-content: center; box-shadow: none;
+    }
+    .composer .mic:hover { border-color: var(--accent); transform: translateY(-1px); }
+    .composer .mic.recording { background: #e5484d; border-color: #e5484d; color: #fff; animation: micPulse 1.2s ease-in-out infinite; }
+    @keyframes micPulse {
+      0% { box-shadow: 0 0 0 0 rgba(229, 72, 77, 0.55); }
+      70% { box-shadow: 0 0 0 12px rgba(229, 72, 77, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(229, 72, 77, 0); }
+    }
+
+    /* ---- Profile view ---- */
+    .profile-scroll { flex: 1; overflow-y: auto; padding: 26px clamp(18px, 5vw, 60px); }
+    .profile-scroll::-webkit-scrollbar { width: 10px; }
+    .profile-scroll::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.12); border-radius: 10px; border: 3px solid transparent; background-clip: padding-box; }
+    .card {
+      background: linear-gradient(180deg, rgba(91, 140, 255, 0.06), rgba(255, 255, 255, 0.02));
+      border: 1px solid var(--line); border-radius: 18px; padding: 20px 22px; margin-bottom: 18px;
+    }
+    .card h3 { font-size: 15px; font-weight: 700; margin-bottom: 14px; }
+    .profile-top { display: flex; gap: 22px; align-items: center; flex-wrap: wrap; }
+    .profile-pic {
+      width: 92px; height: 92px; border-radius: 22px; object-fit: cover; background: var(--panel);
+      border: 1px solid var(--line); display: grid; place-items: center; font-size: 38px; flex-shrink: 0;
+    }
+    .profile-fields { display: flex; flex-direction: column; gap: 12px; flex: 1; min-width: 220px; }
+    .profile-name { font-size: 20px; font-weight: 800; }
+    .field-row { display: flex; gap: 12px; flex-wrap: wrap; }
+    .field { display: flex; flex-direction: column; gap: 5px; }
+    .field label { font-size: 11.5px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
+    .field input[type="number"] {
+      width: 130px; background: var(--panel); border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 12px;
+      padding: 11px 13px; color: var(--text); font-size: 14px; outline: none; font-family: inherit;
+    }
+    .field input:focus { border-color: var(--accent); }
+    .btn-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-top: 4px; }
+    .btn {
+      background: var(--accent-grad); color: #fff; border: none; border-radius: 12px; padding: 10px 18px;
+      font-size: 13.5px; font-weight: 700; cursor: pointer; font-family: inherit;
+      box-shadow: 0 8px 20px rgba(91, 140, 255, 0.3); transition: transform 0.12s ease;
+    }
+    .btn:hover { transform: translateY(-1px); }
+    .btn.secondary { background: rgba(255, 255, 255, 0.06); border: 1px solid var(--line); box-shadow: none; color: var(--text); }
+    .save-hint { font-size: 12.5px; color: var(--muted); }
+
+    .pie-wrap { display: flex; gap: 26px; align-items: center; flex-wrap: wrap; }
+    .pie-legend { display: flex; flex-direction: column; gap: 8px; flex: 1; min-width: 200px; }
+    .legend-item { display: flex; align-items: center; gap: 9px; font-size: 13px; }
+    .legend-swatch { width: 13px; height: 13px; border-radius: 4px; flex-shrink: 0; }
+    .legend-name { text-transform: capitalize; }
+    .legend-count { color: var(--muted); margin-left: auto; font-variant-numeric: tabular-nums; }
+
+    .day-block { margin-bottom: 16px; }
+    .day-head { font-size: 13px; font-weight: 700; color: var(--accent); margin-bottom: 8px; }
+    .day-group { border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; margin-bottom: 8px; background: rgba(255,255,255,0.02); }
+    .day-group .dg-title { font-size: 14px; font-weight: 700; text-transform: capitalize; }
+    .day-group .dg-levels { font-size: 11px; color: var(--accent-2); margin-left: 8px; text-transform: capitalize; }
+    .day-group .dg-list { margin-top: 6px; font-size: 13px; color: var(--muted); line-height: 1.6; }
+    .empty-note { color: var(--muted); font-size: 13.5px; }
+
+    .history-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+    .history-head h3 { margin: 0; }
+    .btn-danger {
+      background: rgba(255, 99, 99, 0.12); color: #ff8a8a; border: 1px solid rgba(255, 99, 99, 0.4);
+      padding: 8px 14px; border-radius: 10px; font-size: 13px; font-weight: 600; cursor: pointer;
+      transition: background 0.12s ease, transform 0.12s ease;
+    }
+    .btn-danger:hover { background: rgba(255, 99, 99, 0.22); transform: translateY(-1px); }
+    .btn-danger:disabled { opacity: 0.55; cursor: default; transform: none; }
+
+    /* ---- Auth view ---- */
+    .auth-wrap { width: 100%; max-width: 420px; }
+    .auth-card {
+      background: linear-gradient(180deg, rgba(27, 34, 54, 0.85), rgba(20, 26, 44, 0.95));
+      border: 1px solid var(--line); border-radius: 22px; padding: 34px 30px; box-shadow: var(--shadow);
+    }
+    .auth-card .brand { justify-content: center; margin-bottom: 8px; }
+    .auth-card h2 { text-align: center; font-size: 22px; font-weight: 800; margin-top: 6px; }
+    .auth-card p.sub { text-align: center; color: var(--muted); font-size: 13.5px; margin-top: 6px; margin-bottom: 22px; }
+    .auth-card input {
+      width: 100%; background: var(--panel); border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 12px;
+      padding: 13px 15px; color: var(--text); font-size: 14.5px; outline: none; margin-bottom: 12px; font-family: inherit;
+    }
+    .auth-card input:focus { border-color: var(--accent); }
+    .auth-card .btn { width: 100%; padding: 13px; font-size: 14.5px; margin-top: 4px; }
+    .auth-toggle { text-align: center; margin-top: 16px; font-size: 13.5px; color: var(--muted); }
+    .auth-toggle a { color: var(--accent); cursor: pointer; font-weight: 600; }
+    .auth-error { color: var(--danger); font-size: 13px; text-align: center; min-height: 18px; margin-bottom: 8px; }
+
+    @media (max-width: 640px) {
+      body { padding: 0; }
+      .chat { height: 100vh; max-height: none; border-radius: 0; border: none; }
+      .bubble { max-width: 90%; }
+      .ex-media { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <!-- ============ AUTH VIEW ============ -->
+  <div class="auth-wrap" id="authWrap">
+    <div class="auth-card">
+      <div class="brand"><div class="avatar">🏋️</div></div>
+      <h2 id="authTitle">Welcome back</h2>
+      <p class="sub" id="authSub">Log in to track your adaptive workout journey.</p>
+      <div class="auth-error" id="authError"></div>
+      <form id="authForm">
+        <input id="authUser" type="text" placeholder="Username" autocomplete="username" />
+        <input id="authPass" type="password" placeholder="Password" autocomplete="current-password" />
+        <button class="btn" type="submit" id="authSubmit">Log in</button>
+      </form>
+      <div class="auth-toggle" id="authToggle">
+        New here? <a id="authSwitch">Create an account</a>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ APP VIEW ============ -->
+  <div class="chat" id="appWrap" hidden>
+    <div class="chat-header">
+      <div class="brand">
+        <div class="avatar">🏋️</div>
+        <div class="brand-text">
+          <h1>AI Gym Trainer</h1>
+          <div class="tagline">Your adaptive personal coach</div>
+        </div>
+      </div>
+      <div class="header-right">
+        <button class="nav-btn active" id="navChat" type="button">Chat</button>
+        <button class="nav-btn" id="navProfile" type="button">Profile</button>
+        <div class="status-pill" id="status">Connecting...</div>
+        <button class="nav-btn ghost" id="logoutBtn" type="button">Log out</button>
+      </div>
+    </div>
+
+    <!-- Chat view -->
+    <div class="view" id="chatView">
+      <div class="messages" id="messages"></div>
+      <form class="composer" id="composer">
+        <input id="input" type="text" placeholder='Type or tap the mic, e.g. "Give me 5 chest exercises"' autocomplete="off" />
+        <button id="mic" type="button" class="mic" title="Speak" aria-label="Record voice">
+          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+            <path fill="currentColor" d="M12 14a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v5a3 3 0 0 0 3 3Z"/>
+            <path fill="currentColor" d="M19 11a1 1 0 1 0-2 0 5 5 0 0 1-10 0 1 1 0 1 0-2 0 7 7 0 0 0 6 6.92V21a1 1 0 1 0 2 0v-3.08A7 7 0 0 0 19 11Z"/>
+          </svg>
+        </button>
+        <button id="send" type="submit">Send</button>
+      </form>
+    </div>
+
+    <!-- Profile view -->
+    <div class="view" id="profileView" hidden>
+      <div class="profile-scroll">
+        <div class="card">
+          <div class="profile-top">
+            <img class="profile-pic" id="profilePic" alt="avatar" style="display:none" />
+            <div class="profile-pic" id="profilePicFallback">🙂</div>
+            <div class="profile-fields">
+              <div class="profile-name" id="profileName">Athlete</div>
+              <div class="field-row">
+                <div class="field">
+                  <label for="heightInput">Height (cm)</label>
+                  <input id="heightInput" type="number" min="0" max="300" step="0.1" placeholder="175" />
+                </div>
+                <div class="field">
+                  <label for="weightInput">Weight (kg)</label>
+                  <input id="weightInput" type="number" min="0" max="600" step="0.1" placeholder="70" />
+                </div>
+              </div>
+              <div class="btn-row">
+                <button class="btn" id="saveProfile" type="button">Save details</button>
+                <label class="btn secondary" for="avatarInput">Change photo</label>
+                <input id="avatarInput" type="file" accept="image/*" style="display:none" />
+                <span class="save-hint" id="saveHint"></span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>Muscles targeted so far</h3>
+          <div class="pie-wrap">
+            <div id="pieHolder"></div>
+            <div class="pie-legend" id="pieLegend"></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="history-head">
+            <h3>Workout history</h3>
+            <button type="button" class="btn-danger" id="clearHistoryBtn">Clear history</button>
+          </div>
+          <div id="historyHolder"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ---------------- Auth state ----------------
+    const TOKEN_KEY = 'trainerToken';
+    const USER_KEY = 'trainerUser';
+    let authMode = 'login';
+
+    const authWrap = document.getElementById('authWrap');
+    const appWrap = document.getElementById('appWrap');
+    const authForm = document.getElementById('authForm');
+    const authUser = document.getElementById('authUser');
+    const authPass = document.getElementById('authPass');
+    const authError = document.getElementById('authError');
+    const authTitle = document.getElementById('authTitle');
+    const authSub = document.getElementById('authSub');
+    const authSubmit = document.getElementById('authSubmit');
+    const authSwitch = document.getElementById('authSwitch');
+    const authToggle = document.getElementById('authToggle');
+
+    function getToken() { return localStorage.getItem(TOKEN_KEY); }
+    function authHeaders(extra) {
+      const h = extra || {};
+      const t = getToken();
+      if (t) h['Authorization'] = 'Bearer ' + t;
+      return h;
+    }
+
+    function setAuthMode(mode) {
+      authMode = mode;
+      authError.textContent = '';
+      if (mode === 'login') {
+        authTitle.textContent = 'Welcome back';
+        authSub.textContent = 'Log in to track your adaptive workout journey.';
+        authSubmit.textContent = 'Log in';
+        authToggle.innerHTML = 'New here? <a id="authSwitch">Create an account</a>';
+      } else {
+        authTitle.textContent = 'Create your account';
+        authSub.textContent = 'Pick a username and password to get started.';
+        authSubmit.textContent = 'Sign up';
+        authToggle.innerHTML = 'Have an account? <a id="authSwitch">Log in</a>';
+      }
+      document.getElementById('authSwitch').addEventListener('click', () =>
+        setAuthMode(authMode === 'login' ? 'signup' : 'login'));
+    }
+
+    authSwitch.addEventListener('click', () => setAuthMode('signup'));
+
+    authForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      authError.textContent = '';
+      const username = authUser.value.trim();
+      const password = authPass.value;
+      if (!username || !password) { authError.textContent = 'Enter a username and password.'; return; }
+      const path = authMode === 'login' ? '/api/auth/login' : '/api/auth/register';
+      try {
+        const res = await fetch(path, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username, password })
+        });
+        const data = await res.json();
+        if (!res.ok) { authError.textContent = data.detail || 'Authentication failed.'; return; }
+        localStorage.setItem(TOKEN_KEY, data.token);
+        localStorage.setItem(USER_KEY, data.username);
+        enterApp();
+      } catch (err) {
+        authError.textContent = 'Network error. Is the server running?';
+      }
+    });
+
+    function showAuth() {
+      appWrap.hidden = true;
+      authWrap.style.display = 'block';
+      authPass.value = '';
+      setAuthMode('login');
+    }
+
+    function logout() {
+      const t = getToken();
+      fetch('/api/auth/logout', { method: 'POST', headers: authHeaders() }).catch(() => {});
+      localStorage.removeItem(TOKEN_KEY);
+      localStorage.removeItem(USER_KEY);
+      sessionId = null;
+      showAuth();
+    }
+    document.getElementById('logoutBtn').addEventListener('click', logout);
+
+    // ---------------- View switching ----------------
+    const chatView = document.getElementById('chatView');
+    const profileView = document.getElementById('profileView');
+    const navChat = document.getElementById('navChat');
+    const navProfile = document.getElementById('navProfile');
+
+    function showChat() {
+      chatView.hidden = false; profileView.hidden = true;
+      navChat.classList.add('active'); navProfile.classList.remove('active');
+    }
+    function showProfile() {
+      chatView.hidden = true; profileView.hidden = false;
+      navProfile.classList.add('active'); navChat.classList.remove('active');
+      loadProfile();
+    }
+    navChat.addEventListener('click', showChat);
+    navProfile.addEventListener('click', showProfile);
+
+    // ---------------- Chat ----------------
+    const messagesEl = document.getElementById('messages');
+    const statusEl = document.getElementById('status');
+    const formEl = document.getElementById('composer');
+    const inputEl = document.getElementById('input');
+    const sendBtn = document.getElementById('send');
+    const micBtn = document.getElementById('mic');
+
+    let sessionId = null;
+    let busy = false;
+
+    function setStatus(text, kind = '') {
+      statusEl.textContent = text;
+      statusEl.className = `status-pill ${kind}`.trim();
+    }
+
+    function renderWelcome() {
+      const name = localStorage.getItem(USER_KEY) || 'athlete';
+      const suggestions = [
+        'Give me 5 chest exercises',
+        'Full body: chest, back and legs',
+        '5 ab exercises',
+        'I want to do barbell curls',
+      ];
+      const wrap = document.createElement('div');
+      wrap.className = 'welcome';
+      wrap.id = 'welcome';
+      wrap.innerHTML = `
+        <div class="hero-emoji">💪</div>
+        <h2>Let's crush today's workout, ${escapeHtml(name)}</h2>
+        <p>Tell me which muscles you want to train and how many exercises. If you don't pick a difficulty, I'll adapt it from your recent sessions and avoid repeating exercises.</p>
+        <div class="chips">
+          ${suggestions.map((s) => `<button type="button" class="chip">${s}</button>`).join('')}
+        </div>`;
+      messagesEl.appendChild(wrap);
+      wrap.querySelectorAll('.chip').forEach((chip) => {
+        chip.addEventListener('click', () => sendMessage(chip.textContent));
+      });
+    }
+
+    function clearWelcome() {
+      const w = document.getElementById('welcome');
+      if (w) w.remove();
+    }
+
+    function escapeHtml(text) {
+      return (text || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+
+    function addMessage(who, text, exercises) {
+      const wrap = document.createElement('div');
+      wrap.className = `msg ${who === 'You' ? 'user' : 'bot'}`;
+      const bubble = document.createElement('div');
+      bubble.className = 'bubble';
+      const formatted = escapeHtml(text).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>').replace(/\n/g, '<br>');
+      let html = `<span class="who">${escapeHtml(who)}</span>${formatted}`;
+
+      if (Array.isArray(exercises) && exercises.length) {
+        html += '<div class="exercises">';
+        exercises.forEach((ex, i) => {
+          const muscles = (ex.primaryMuscles || []).join(', ');
+          const tag = ex.group ? `<em class="tag">[${escapeHtml(ex.group)}]</em>` : '';
+          const meta = [ex.level, ex.equipment].filter(Boolean).join(' · ');
+          let media = '';
+          const imgs = Array.isArray(ex.images) ? ex.images : [];
+          if (imgs.length) {
+            media = '<div class="ex-media">';
+            imgs.slice(0, 2).forEach((url) => {
+              media += `<img class="ex-img" src="${escapeHtml(url)}" alt="${escapeHtml(ex.name || 'exercise')}" loading="lazy" onerror="this.style.display='none'" />`;
+            });
+            media += '</div>';
+          }
+          let steps = '';
+          const ins = Array.isArray(ex.instructions) ? ex.instructions : [];
+          if (ins.length) {
+            steps = '<ol class="ex-steps">';
+            ins.forEach((step) => { steps += `<li>${escapeHtml(step)}</li>`; });
+            steps += '</ol>';
+          }
+          const target = muscles ? `<span class="ex-target">Targets: ${escapeHtml(muscles)}</span>` : '';
+          html += `<div class="exercise">
+              <strong>${i + 1}. ${escapeHtml(ex.name || '')}</strong>${tag}
+              <span class="meta">${escapeHtml(meta)}</span>
+              ${target}
+              ${media}
+              ${steps}
+            </div>`;
+        });
+        html += '</div>';
+      }
+
+      bubble.innerHTML = html;
+      wrap.appendChild(bubble);
+      messagesEl.appendChild(wrap);
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+      return wrap;
+    }
+
+    function addTyping() {
+      const wrap = document.createElement('div');
+      wrap.className = 'msg bot';
+      wrap.innerHTML = '<div class="bubble typing">Trainer is thinking</div>';
+      messagesEl.appendChild(wrap);
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+      return wrap;
+    }
+
+    async function sendMessage(text) {
+      if (busy || !text.trim()) return;
+      busy = true;
+      sendBtn.disabled = true;
+      if (micBtn) micBtn.disabled = true;
+
+      clearWelcome();
+      addMessage('You', text);
+      const typing = addTyping();
+
+      try {
+        const response = await fetch('/api/trainer/chat', {
+          method: 'POST',
+          headers: authHeaders({ 'Content-Type': 'application/json' }),
+          body: JSON.stringify({ message: text, session_id: sessionId })
+        });
+
+        if (response.status === 401) { typing.remove(); logout(); return; }
+        const data = await response.json();
+        typing.remove();
+
+        if (!response.ok) {
+          addMessage('Trainer', `Error: ${data.detail || 'request failed.'}`);
+          setStatus(data.detail || 'Request failed.', 'error');
+          return;
+        }
+        sessionId = data.sessionId || sessionId;
+        addMessage('Trainer', data.reply || '(no reply)', data.exercises);
+        setStatus('Connected.', 'ok');
+      } catch (error) {
+        typing.remove();
+        addMessage('Trainer', `Network error: ${error.message}`);
+        setStatus('Network error. Is the server running?', 'error');
+      } finally {
+        busy = false;
+        sendBtn.disabled = false;
+        if (micBtn) micBtn.disabled = false;
+        inputEl.focus();
+      }
+    }
+
+    formEl.addEventListener('submit', (event) => {
+      event.preventDefault();
+      const text = inputEl.value;
+      inputEl.value = '';
+      sendMessage(text);
+    });
+
+    // ---------------- Profile ----------------
+    const PIE_COLORS = ['#5b8cff','#38d39f','#ff8f5b','#b07aff','#ffd34d','#ff6b9d','#4dd2ff','#7ee787','#f78fb3','#c0ca33','#ff8a65','#9ccc65','#ba68c8','#4fc3f7','#ffb74d','#a1887f','#90a4ae'];
+    const profilePic = document.getElementById('profilePic');
+    const profilePicFallback = document.getElementById('profilePicFallback');
+    const profileName = document.getElementById('profileName');
+    const heightInput = document.getElementById('heightInput');
+    const weightInput = document.getElementById('weightInput');
+    const saveHint = document.getElementById('saveHint');
+    const avatarInput = document.getElementById('avatarInput');
+
+    async function authedJson(path) {
+      const res = await fetch(path, { headers: authHeaders() });
+      if (res.status === 401) { logout(); throw new Error('unauthorized'); }
+      return res.json();
+    }
+
+    async function loadProfile() {
+      try {
+        const p = await authedJson('/api/profile');
+        profileName.textContent = p.username || 'Athlete';
+        heightInput.value = p.heightCm != null ? p.heightCm : '';
+        weightInput.value = p.weightKg != null ? p.weightKg : '';
+        if (p.avatarUrl) {
+          profilePic.src = p.avatarUrl + '?t=' + Date.now();
+          profilePic.style.display = 'block';
+          profilePicFallback.style.display = 'none';
+        } else {
+          profilePic.style.display = 'none';
+          profilePicFallback.style.display = 'grid';
+        }
+      } catch (e) { return; }
+      loadStats();
+      loadHistory();
+    }
+
+    document.getElementById('saveProfile').addEventListener('click', async () => {
+      saveHint.textContent = 'Saving...';
+      const body = {
+        height_cm: heightInput.value === '' ? null : parseFloat(heightInput.value),
+        weight_kg: weightInput.value === '' ? null : parseFloat(weightInput.value),
+      };
+      try {
+        const res = await fetch('/api/profile', {
+          method: 'POST',
+          headers: authHeaders({ 'Content-Type': 'application/json' }),
+          body: JSON.stringify(body)
+        });
+        if (res.status === 401) { logout(); return; }
+        saveHint.textContent = res.ok ? 'Saved.' : 'Could not save.';
+      } catch (e) { saveHint.textContent = 'Network error.'; }
+      setTimeout(() => { saveHint.textContent = ''; }, 2500);
+    });
+
+    avatarInput.addEventListener('change', async () => {
+      const file = avatarInput.files[0];
+      if (!file) return;
+      saveHint.textContent = 'Uploading photo...';
+      const fd = new FormData();
+      fd.append('file', file);
+      try {
+        const res = await fetch('/api/profile/avatar', { method: 'POST', headers: authHeaders(), body: fd });
+        if (res.status === 401) { logout(); return; }
+        const data = await res.json();
+        if (res.ok && data.avatarUrl) {
+          profilePic.src = data.avatarUrl + '?t=' + Date.now();
+          profilePic.style.display = 'block';
+          profilePicFallback.style.display = 'none';
+          saveHint.textContent = 'Photo updated.';
+        } else {
+          saveHint.textContent = (data.detail) || 'Upload failed.';
+        }
+      } catch (e) { saveHint.textContent = 'Network error.'; }
+      setTimeout(() => { saveHint.textContent = ''; }, 2500);
+    });
+
+    function buildPie(totals) {
+      const holder = document.getElementById('pieHolder');
+      const legend = document.getElementById('pieLegend');
+      const entries = Object.entries(totals || {});
+      if (!entries.length) {
+        holder.innerHTML = '';
+        legend.innerHTML = '<div class="empty-note">No workouts yet. Finish a session and your muscle breakdown will appear here.</div>';
+        return;
+      }
+      const total = entries.reduce((s, [, v]) => s + v, 0);
+      const size = 180, r = 80, cx = size / 2, cy = size / 2;
+      let angle = -Math.PI / 2;
+      let paths = '';
+      entries.forEach(([, value], i) => {
+        const slice = (value / total) * Math.PI * 2;
+        const x1 = cx + r * Math.cos(angle), y1 = cy + r * Math.sin(angle);
+        angle += slice;
+        const x2 = cx + r * Math.cos(angle), y2 = cy + r * Math.sin(angle);
+        const large = slice > Math.PI ? 1 : 0;
+        const color = PIE_COLORS[i % PIE_COLORS.length];
+        if (entries.length === 1) {
+          paths += `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${color}"></circle>`;
+        } else {
+          paths += `<path d="M${cx},${cy} L${x1.toFixed(2)},${y1.toFixed(2)} A${r},${r} 0 ${large},1 ${x2.toFixed(2)},${y2.toFixed(2)} Z" fill="${color}"></path>`;
+        }
+      });
+      holder.innerHTML = `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">${paths}<circle cx="${cx}" cy="${cy}" r="42" fill="#141a2c"></circle><text x="${cx}" y="${cy - 4}" text-anchor="middle" fill="#eef1fb" font-size="22" font-weight="700">${total}</text><text x="${cx}" y="${cy + 14}" text-anchor="middle" fill="#9aa3bd" font-size="11">exercises</text></svg>`;
+      legend.innerHTML = entries.map(([name, value], i) =>
+        `<div class="legend-item"><span class="legend-swatch" style="background:${PIE_COLORS[i % PIE_COLORS.length]}"></span><span class="legend-name">${escapeHtml(name)}</span><span class="legend-count">${value}</span></div>`
+      ).join('');
+    }
+
+    async function loadStats() {
+      try { const s = await authedJson('/api/stats/muscles'); buildPie(s.totals); }
+      catch (e) {}
+    }
+
+    async function loadHistory() {
+      const holder = document.getElementById('historyHolder');
+      try {
+        const h = await authedJson('/api/history');
+        const days = h.days || [];
+        if (!days.length) {
+          holder.innerHTML = '<div class="empty-note">No history yet. Your completed workouts will be listed here by day.</div>';
+          return;
+        }
+        holder.innerHTML = days.map((d) => {
+          const groups = d.groups.map((g) => {
+            const levels = (g.levels && g.levels.length) ? `<span class="dg-levels">${escapeHtml(g.levels.join(' + '))}</span>` : '';
+            const list = (g.exercises || []).map(escapeHtml).join(', ');
+            return `<div class="day-group">
+                <div><span class="dg-title">${escapeHtml(g.muscle)} — ${g.count} exercise${g.count === 1 ? '' : 's'}</span>${levels}</div>
+                <div class="dg-list">${list}</div>
+              </div>`;
+          }).join('');
+          return `<div class="day-block"><div class="day-head">${escapeHtml(d.day)}</div>${groups}</div>`;
+        }).join('');
+      } catch (e) {}
+    }
+
+    const clearHistoryBtn = document.getElementById('clearHistoryBtn');
+    clearHistoryBtn.addEventListener('click', async () => {
+      if (!confirm('Erase all your past exercise data? This clears your history, muscle chart, and difficulty progression. This cannot be undone.')) return;
+      clearHistoryBtn.disabled = true;
+      const original = clearHistoryBtn.textContent;
+      clearHistoryBtn.textContent = 'Clearing...';
+      try {
+        const res = await fetch('/api/history', { method: 'DELETE', headers: authHeaders() });
+        if (res.status === 401) { logout(); return; }
+        if (res.ok) {
+          await loadStats();
+          await loadHistory();
+          clearHistoryBtn.textContent = 'Cleared';
+        } else {
+          clearHistoryBtn.textContent = 'Failed';
+        }
+      } catch (e) {
+        clearHistoryBtn.textContent = 'Network error';
+      }
+      setTimeout(() => { clearHistoryBtn.textContent = original; clearHistoryBtn.disabled = false; }, 1800);
+    });
+
+    // ---------------- Voice input ----------------
+    (function setupVoice() {
+      const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (!SR || !micBtn) {
+        if (micBtn) micBtn.style.display = 'none';
+        return;
+      }
+      const recognition = new SR();
+      recognition.lang = 'en-US';
+      recognition.interimResults = true;
+      recognition.continuous = true;
+      recognition.maxAlternatives = 1;
+      const SILENCE_MS = 1800;
+      let recording = false, stopRequested = false, aborted = false, committed = '', silenceTimer = null;
+
+      function setRecordingUI(on) { micBtn.classList.toggle('recording', on); micBtn.title = on ? 'Stop and send' : 'Speak'; }
+      function clearSilence() { if (silenceTimer) { clearTimeout(silenceTimer); silenceTimer = null; } }
+      function armSilence() { clearSilence(); silenceTimer = setTimeout(() => { if (recording) finishAndSend(); }, SILENCE_MS); }
+      function finishAndSend() { if (!recording) return; stopRequested = true; recording = false; clearSilence(); setRecordingUI(false); try { recognition.stop(); } catch (_) {} }
+      function beginEngine() { try { recognition.start(); } catch (err) {} }
+
+      async function startListening() {
+        committed = ''; stopRequested = false; aborted = false; recording = true;
+        if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+          try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            stream.getTracks().forEach((t) => t.stop());
+          } catch (err) {
+            recording = false; aborted = true; setRecordingUI(false);
+            setStatus('Microphone blocked: ' + (err && err.name ? err.name : err), 'error');
+            return;
+          }
+        }
+        beginEngine();
+      }
+
+      micBtn.addEventListener('click', () => {
+        if (busy) return;
+        if (recording) finishAndSend();
+        else { inputEl.value = ''; startListening(); }
+      });
+
+      recognition.onstart = () => { setRecordingUI(true); setStatus('Listening... it sends when you pause.', 'ok'); };
+      recognition.onresult = (event) => {
+        let interim = '';
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const transcript = event.results[i][0].transcript;
+          if (event.results[i].isFinal) committed += transcript + ' ';
+          else interim += transcript;
+        }
+        inputEl.value = (committed + interim).trim();
+        armSilence();
+      };
+      recognition.onerror = (event) => {
+        if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+          aborted = true; recording = false; clearSilence(); setRecordingUI(false);
+          setStatus('Microphone permission denied.', 'error');
+        } else if (event.error === 'network') {
+          aborted = true; recording = false; clearSilence(); setRecordingUI(false);
+          setStatus('Speech service unreachable (needs internet; try Chrome/Edge).', 'error');
+        }
+      };
+      recognition.onend = () => {
+        if (recording && !stopRequested && !aborted) { try { recognition.start(); return; } catch (_) {} }
+        clearSilence();
+        const wasStop = stopRequested;
+        recording = false; stopRequested = false; setRecordingUI(false);
+        if (wasStop) {
+          const text = (committed || inputEl.value).trim();
+          if (text) { inputEl.value = ''; sendMessage(text); }
+          else setStatus('No speech captured. Try again.', 'error');
+        }
+      };
+    })();
+
+    // ---------------- Boot ----------------
+    async function enterApp() {
+      authWrap.style.display = 'none';
+      appWrap.hidden = false;
+      showChat();
+      messagesEl.innerHTML = '';
+      try {
+        const response = await fetch('/api/health');
+        const data = await response.json();
+        if (!data.ragReady) {
+          setStatus('Embeddings missing. Run build_embeddings.py first.', 'error');
+          inputEl.disabled = true; sendBtn.disabled = true;
+        } else if (!data.agentReady) {
+          setStatus('LLM not configured. Check .env and restart.', 'error');
+          inputEl.disabled = true; sendBtn.disabled = true;
+        } else {
+          setStatus('Connected', 'ok');
+          renderWelcome();
+          inputEl.focus();
+        }
+      } catch {
+        setStatus('Cannot reach server. Open http://127.0.0.1:8000', 'error');
+      }
+    }
+
+    function boot() {
+      setAuthMode('login');
+      if (getToken()) enterApp();
+      else showAuth();
+    }
+
+    boot();
+  </script>
+</body>
+</html>
