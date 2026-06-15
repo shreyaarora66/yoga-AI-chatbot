@@ -1,0 +1,14 @@
+# Python 3.11+ recommended. Works on Python 3.14.
+# If pip fails with SSL errors, install with:
+# pip install --trusted-host pypi.org --trusted-host files.pythonhosted.org -r requirements.txt
+
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0
+python-multipart>=0.0.9
+python-dotenv>=1.0.1
+huggingface-hub>=0.28.0
+sentence-transformers>=3.0.0
+google-genai>=1.0.0
+requests>=2.28.0
+numpy>=2.0.0
+pydantic>=2.9.0
