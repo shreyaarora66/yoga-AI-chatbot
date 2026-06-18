@@ -1,0 +1,609 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI Gym Trainer — Architecture Reference</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <style>
+    * { color: #000000 !important; background: #ffffff !important; }
+    body {
+      font-family: Arial, Helvetica, sans-serif;
+      font-size: 13px;
+      line-height: 1.5;
+      max-width: 1200px;
+      margin: 24px auto;
+      padding: 0 16px 48px;
+    }
+    h1 { font-size: 22px; margin-bottom: 6px; }
+    h2 {
+      font-size: 15px;
+      font-weight: bold;
+      margin: 28px 0 10px;
+      padding: 0;
+      border: none;
+    }
+    h3 { font-size: 13px; font-weight: bold; margin: 16px 0 8px; }
+    p, li { margin: 6px 0; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 10px 0 18px;
+      font-size: 12px;
+    }
+    th, td {
+      border: 1px solid #000000;
+      padding: 7px 9px;
+      text-align: left;
+      vertical-align: top;
+    }
+    th { font-weight: bold; }
+    code {
+      font-family: Consolas, monospace;
+      font-size: 11px;
+    }
+    pre {
+      border: 1px solid #000;
+      padding: 10px;
+      overflow-x: auto;
+      font-size: 11px;
+      line-height: 1.4;
+      margin: 10px 0;
+    }
+    .mermaid {
+      border: 1px solid #000;
+      padding: 12px;
+      margin: 12px 0 20px;
+      overflow-x: auto;
+    }
+    .toc a { text-decoration: underline; }
+    .note { font-style: italic; margin-top: 20px; }
+    @media print {
+      body { margin: 12px; }
+      h2 { page-break-after: avoid; }
+      .mermaid { page-break-inside: avoid; }
+    }
+  </style>
+</head>
+<body>
+
+<h1>AI Gym Trainer — Architecture &amp; Flow Reference</h1>
+<p>Use this document to explain how the codebase works end-to-end. Open in a browser, then Print → Save as PDF.</p>
+
+<h2>Table of contents</h2>
+<ol class="toc">
+  <li><a href="#overview">System overview</a></li>
+  <li><a href="#layers">Layered architecture</a></li>
+  <li><a href="#patterns">Design patterns used</a></li>
+  <li><a href="#modules">Module map</a></li>
+  <li><a href="#startup">Server startup flow</a></li>
+  <li><a href="#auth">Authentication flow</a></li>
+  <li><a href="#chat">Chat request flow (end-to-end)</a></li>
+  <li><a href="#agent">LLM agent + tool-calling loop</a></li>
+  <li><a href="#plan">plan_workout tool (RAG pipeline)</a></li>
+  <li><a href="#find">find_exercise tool</a></li>
+  <li><a href="#progression">Adaptive difficulty state machine</a></li>
+  <li><a href="#rag-build">Offline RAG index build</a></li>
+  <li><a href="#profile">Profile, history &amp; stats</a></li>
+  <li><a href="#data">Data stores &amp; files</a></li>
+  <li><a href="#prompts">User prompt → code path map</a></li>
+</ol>
+
+<h2 id="overview">1. System overview</h2>
+<p>The app is a <strong>RAG-backed AI gym trainer</strong>: a vanilla JS frontend talks to a FastAPI backend. An LLM agent (Ollama local or Gemini cloud) owns the conversation and calls Python tools that search a pre-built exercise vector database. Logged-in users get adaptive difficulty and workout history in SQLite.</p>
+
+<div class="mermaid">
+flowchart TB
+  subgraph Client["Browser (web/index.html)"]
+    UI[Chat UI + Profile tab]
+  end
+
+  subgraph Server["FastAPI (app/main.py)"]
+    API[REST API]
+    SESS[In-memory sessions<br/>session_id → conversation]
+  end
+
+  subgraph Agent["LLM Agent (app/agent/)"]
+    PROV[Provider: Ollama or Gemini]
+    TOOLS[Tools: plan_workout, find_exercise]
+  end
+
+  subgraph RAG["RAG Layer"]
+    EMB[embeddings.py]
+    STORE[rag_store.py]
+    RAGDB[(rag_db/<br/>embeddings.npy<br/>exercises.json)]
+  end
+
+  subgraph Persist["Persistence"]
+    SQL[(user_data/trainer.db)]
+    AVATAR[(user_data/avatars/)]
+  end
+
+  subgraph External["External services"]
+    OLLAMA[Ollama :11434]
+    GEMINI[Google Gemini API]
+    HF[Hugging Face optional]
+  end
+
+  UI -->|HTTPS JSON| API
+  API --> SESS
+  SESS --> PROV
+  PROV --> OLLAMA
+  PROV --> GEMINI
+  PROV --> TOOLS
+  TOOLS --> EMB
+  TOOLS --> STORE
+  EMB --> RAGDB
+  STORE --> RAGDB
+  TOOLS --> SQL
+  API --> SQL
+  API --> AVATAR
+  EMB -.->|EMBED_MODE=api| HF
+</div>
+
+<h2 id="layers">2. Layered architecture</h2>
+<table>
+  <tr>
+    <th>Layer</th>
+    <th>Files</th>
+    <th>Responsibility</th>
+  </tr>
+  <tr>
+    <td>Presentation</td>
+    <td><code>web/index.html</code></td>
+    <td>Login/register UI, chat, exercise cards, profile pie chart, history, avatar upload</td>
+  </tr>
+  <tr>
+    <td>API / routing</td>
+    <td><code>app/main.py</code></td>
+    <td>HTTP endpoints, session map, request logging middleware, static file mounts</td>
+  </tr>
+  <tr>
+    <td>Auth</td>
+    <td><code>app/auth.py</code></td>
+    <td>PBKDF2 password hashing, bearer tokens, FastAPI <code>Depends(current_user)</code></td>
+  </tr>
+  <tr>
+    <td>Agent / orchestration</td>
+    <td><code>app/agent/providers.py</code>, <code>prompts.py</code></td>
+    <td>LLM conversation, tool schemas, multi-round Ollama loop, system prompt</td>
+  </tr>
+  <tr>
+    <td>Domain tools (skills)</td>
+    <td><code>app/agent/tools.py</code></td>
+    <td><code>run_plan_workout</code>, <code>run_find_exercise</code>, count splitting, image URLs</td>
+  </tr>
+  <tr>
+    <td>Adaptive logic</td>
+    <td><code>app/progression.py</code>, <code>app/muscles.py</code></td>
+    <td>7-day difficulty state machine, muscle alias normalization</td>
+  </tr>
+  <tr>
+    <td>RAG retrieval</td>
+    <td><code>app/rag_store.py</code>, <code>app/embeddings.py</code></td>
+    <td>Vector search, keyword boost, level filter, query embedding</td>
+  </tr>
+  <tr>
+    <td>Persistence</td>
+    <td><code>app/storage.py</code></td>
+    <td>SQLite: users, tokens, profiles, workout_log</td>
+  </tr>
+  <tr>
+    <td>Config / infra</td>
+    <td><code>app/config.py</code>, <code>logging_config.py</code>, <code>ssl_fix.py</code></td>
+    <td>.env settings, paths, logging to <code>logs/trainer.txt</code></td>
+  </tr>
+  <tr>
+    <td>Offline build</td>
+    <td><code>scripts/build_embeddings.py</code></td>
+    <td>One-time: embed all exercises from <code>data.json</code> → <code>rag_db/</code></td>
+  </tr>
+</table>
+
+<h2 id="patterns">3. Design patterns used</h2>
+<table>
+  <tr>
+    <th>Pattern</th>
+    <th>Where</th>
+    <th>Why</th>
+  </tr>
+  <tr>
+    <td><strong>RAG</strong> (Retrieval Augmented Generation)</td>
+    <td><code>rag_store</code> + <code>embeddings</code> + tools</td>
+    <td>LLM does not memorize 873 exercises; tools retrieve real data from vector DB</td>
+  </tr>
+  <tr>
+    <td><strong>LLM tool / function calling</strong></td>
+    <td><code>providers.py</code></td>
+    <td>Model decides when to call <code>plan_workout</code> or <code>find_exercise</code></td>
+  </tr>
+  <tr>
+    <td><strong>Agent loop</strong> (multi-round)</td>
+    <td><code>OllamaConversation.send()</code></td>
+    <td>Round 1: tool call → Round 2: forced text summary (budget from <code>OLLAMA_TOOL_ROUNDS</code>)</td>
+  </tr>
+  <tr>
+    <td><strong>Strategy</strong> (provider swap)</td>
+    <td><code>start_conversation()</code></td>
+    <td>Same tools + prompts; swap Ollama vs Gemini via <code>AGENT_PROVIDER</code></td>
+  </tr>
+  <tr>
+    <td><strong>Factory</strong></td>
+    <td><code>app/agent/__init__.py</code> → <code>start_conversation</code></td>
+    <td>Creates the right conversation object for the configured provider</td>
+  </tr>
+  <tr>
+    <td><strong>Collector</strong> (shared mutable list)</td>
+    <td><code>collector: list[dict]</code> passed to tools</td>
+    <td>Tools append exercises; provider returns deduped list to API → frontend</td>
+  </tr>
+  <tr>
+    <td><strong>Session state</strong> (in-memory)</td>
+    <td><code>main.conversations</code></td>
+    <td><code>session_id</code> → {conversation, user_id}; LLM keeps full message history</td>
+  </tr>
+  <tr>
+    <td><strong>State machine</strong></td>
+    <td><code>progression.next_levels()</code></td>
+    <td>beginner → beginner+intermediate → intermediate → intermediate+expert</td>
+  </tr>
+  <tr>
+    <td><strong>Normalizer / alias map</strong></td>
+    <td><code>muscles.normalize_muscles()</code></td>
+    <td>"abs" → abdominals, "legs" → quad+ham+calves+glutes, "back" → lats+mid+lower</td>
+  </tr>
+  <tr>
+    <td><strong>Singleton / cache</strong></td>
+    <td><code>@lru_cache get_local_model()</code>, <code>_store_cache</code></td>
+    <td>Embedding model and RAG matrix loaded once per server process</td>
+  </tr>
+  <tr>
+    <td><strong>Dependency injection</strong></td>
+    <td><code>Depends(auth.current_user)</code></td>
+    <td>Protected routes auto-resolve user_id from Bearer token</td>
+  </tr>
+  <tr>
+    <td><strong>Offline-first build, online query</strong></td>
+    <td><code>build_embeddings.py</code> vs runtime search</td>
+    <td>Documents embedded offline; runtime only embeds short muscle queries</td>
+  </tr>
+  <tr>
+    <td><strong>Fallback chain</strong></td>
+    <td><code>_collect_unique()</code> in tools</td>
+    <td>Planned levels → fallback levels → allow repeats if DB exhausted</td>
+  </tr>
+</table>
+
+<h2 id="modules">4. Module map (file → role)</h2>
+<pre>
+web/index.html          Frontend: auth, chat, profile, pie chart, history
+app/main.py             FastAPI app, routes, session store, middleware
+app/auth.py             Register, login, token resolve, current_user dependency
+app/config.py           .env, paths, provider/model/embed settings
+app/storage.py          SQLite CRUD: users, profiles, tokens, workout_log
+app/muscles.py          17 canonical muscles + aliases + group expansion
+app/progression.py      7-day adaptive difficulty per muscle
+app/embeddings.py       Sentence Transformers (local) or HF API (remote)
+app/rag_store.py        Load embeddings.npy, cosine search, keyword boost, find_by_name
+app/agent/prompts.py    SYSTEM_INSTRUCTION + tool descriptions
+app/agent/tools.py      run_plan_workout, run_find_exercise (provider-agnostic)
+app/agent/providers.py  GeminiConversation, OllamaConversation, tool registry
+scripts/build_embeddings.py   Offline index builder from data.json
+data.json               Source exercise catalog (873 exercises)
+rag_db/                 Precomputed vectors + exercise JSON
+user_data/trainer.db    Per-user accounts and workout history
+logs/trainer.txt        Application log file
+</pre>
+
+<h2 id="startup">5. Server startup flow</h2>
+<div class="mermaid">
+sequenceDiagram
+  participant U as uvicorn
+  participant M as app/main.py
+  participant C as app/config.py
+  participant L as logging_config
+  participant S as storage
+  participant R as rag_store
+
+  U->>M: import app.main
+  M->>C: load_dotenv(.env)
+  M->>L: setup_logging()
+  M->>S: init_db() → trainer.db schema
+  M->>R: is_store_ready() check
+  M->>M: mount static, avatars, images
+  Note over M: conversations = {} (empty session map)
+  M-->>U: app ready on :8000
+</div>
+
+<h2 id="auth">6. Authentication flow</h2>
+<div class="mermaid">
+sequenceDiagram
+  participant UI as Browser
+  participant API as /api/auth/*
+  participant A as auth.py
+  participant DB as storage (SQLite)
+
+  UI->>API: POST /register {username, password}
+  API->>A: hash_password (PBKDF2-SHA256 + salt)
+  A->>DB: create_user + create_token
+  DB-->>A: user_id, token
+  A-->>UI: {token, username, user_id}
+
+  UI->>UI: store token in localStorage
+
+  UI->>API: POST /chat (Authorization: Bearer token)
+  API->>A: resolve_token → user_id
+  alt invalid / missing token
+    API-->>UI: 401 Not authenticated
+  end
+</div>
+
+<h2 id="chat">7. Chat request flow (end-to-end)</h2>
+<div class="mermaid">
+sequenceDiagram
+  participant UI as web/index.html
+  participant API as POST /api/trainer/chat
+  participant S as conversations map
+  participant AG as Agent (Ollama/Gemini)
+  participant T as tools.py
+  participant DB as SQLite + rag_db
+
+  UI->>API: {message, session_id?} + Bearer token
+  API->>API: is_store_ready? is_agent_enabled?
+  API->>API: resolve user_id from token
+
+  alt new or foreign session
+    API->>AG: start_conversation(user_id)
+    API->>S: store session_id → {conversation, user_id}
+  else reuse session
+    API->>S: get existing conversation
+  end
+
+  API->>AG: conversation.send(message)
+  AG->>AG: LLM decides: text only OR tool call
+  opt tool call
+    AG->>T: run_plan_workout / run_find_exercise
+    T->>DB: RAG search + log workout
+    T-->>AG: tool result JSON
+    AG->>AG: second LLM round (summary)
+  end
+
+  AG-->>API: (reply text, exercises[])
+  API-->>UI: {type, sessionId, reply, exercises}
+  UI->>UI: render chat bubble + exercise cards
+</div>
+
+<h3>Session rules</h3>
+<ul>
+  <li>Each <code>session_id</code> is tied to one <code>user_id</code>.</li>
+  <li>If <code>session_id</code> is missing, invalid, or belongs to another user → new UUID session.</li>
+  <li>Conversation object holds full LLM message history (for "next exercise", "repeat", etc.).</li>
+  <li>Sessions live in memory only — server restart clears them; workout history stays in SQLite.</li>
+</ul>
+
+<h2 id="agent">8. LLM agent + tool-calling loop (Ollama)</h2>
+<p>Gemini uses native automatic function calling in one SDK call. Ollama uses an explicit multi-round loop:</p>
+
+<div class="mermaid">
+flowchart TD
+  A[User message appended] --> B{Round &lt; budget?}
+  B -->|yes| C[POST Ollama /api/chat<br/>with OLLAMA_TOOLS]
+  C --> D{tool_calls in response?}
+  D -->|yes| E[Execute each tool<br/>OLLAMA_TOOL_REGISTRY]
+  E --> F[Append tool result to messages]
+  F --> B
+  D -->|no| G[Return text reply + collector]
+  B -->|final round| H[Inject: do NOT call tools]
+  H --> C
+  G --> I[dedupe exercises by name]
+  I --> J[Return to main.py]
+</div>
+
+<p><strong>Two tools only:</strong></p>
+<table>
+  <tr><th>Tool</th><th>When LLM calls it</th><th>Python function</th></tr>
+  <tr><td><code>plan_workout</code></td><td>User names muscle(s) for a workout</td><td><code>run_plan_workout()</code></td></tr>
+  <tr><td><code>find_exercise</code></td><td>User names one specific exercise</td><td><code>run_find_exercise()</code></td></tr>
+</table>
+
+<p><strong>No tool</strong> (LLM text only): greetings, "next exercise", "repeat", "stop", general chat.</p>
+
+<h2 id="plan">9. plan_workout tool — full RAG pipeline</h2>
+<div class="mermaid">
+flowchart TD
+  START[run_plan_workout muscles, counts, level] --> PARSE[Parse groups + explicit counts]
+  PARSE --> SPLIT{distribute counts}
+  SPLIT -->|no counts| AUTO[Split DAILY_EXERCISE_TOTAL=15 across groups]
+  SPLIT -->|partial counts| FILL[Explicit + remainder to unspecified]
+  SPLIT -->|all explicit| USE[Use exact counts capped at MAX=30]
+
+  AUTO --> LOOP[For each muscle group]
+  FILL --> LOOP
+  USE --> LOOP
+
+  LOOP --> EMB[embed_text: muscle + exercises]
+  EMB --> CANON[normalize_muscles → canonical key]
+  CANON --> LEVEL{level given?}
+  LEVEL -->|yes| FIX[Use explicit level]
+  LEVEL -->|no + user_id| PROG[progression.next_level_plan]
+  LEVEL -->|no + anonymous| ANY[Any level search]
+
+  FIX --> UNIQ[progression.served_names 7-day window]
+  PROG --> UNIQ
+  ANY --> SEARCH
+
+  UNIQ --> SEARCH[_collect_unique → rag_store.search_exercises]
+  SEARCH --> PHASE1[Phase 1: fill per level plan]
+  PHASE1 --> PHASE2[Phase 2: fallback levels if short]
+  PHASE2 --> PHASE3[Phase 3: allow repeats if still short]
+
+  PHASE3 --> LOG[storage.log_workout per group]
+  LOG --> COLL[Append to collector with group + image URLs]
+  COLL --> LOOP
+  LOOP --> DONE[Return groups + total to LLM]
+</div>
+
+<h3>RAG search internals (<code>rag_store.search_exercises</code>)</h3>
+<ol>
+  <li>Load cached matrix: 873 × 384 embeddings + exercise JSON</li>
+  <li>Cosine similarity: query vector vs all exercise vectors</li>
+  <li>Optional hard filter: <code>level=beginner|intermediate|expert</code></li>
+  <li>Optional exclude: names already served in 7-day window</li>
+  <li>Keyword boost: +score if query tokens match primary muscle or level</li>
+  <li>Return top_k exercises sorted by final score</li>
+</ol>
+
+<h2 id="find">10. find_exercise tool</h2>
+<div class="mermaid">
+flowchart LR
+  A[User: I want barbell curls] --> B[LLM calls find_exercise name]
+  B --> C[rag_store.find_by_name]
+  C --> D{Match?}
+  D -->|exact / substring / token overlap| E[Return exercise + log to DB]
+  D -->|none| F[found=false, empty collector]
+  E --> G[LLM describes steps from tool data]
+</div>
+
+<h2 id="progression">11. Adaptive difficulty state machine</h2>
+<p>Reads <strong>most recent prior day</strong> within 7 days (same-day repeats do not advance).</p>
+
+<div class="mermaid">
+stateDiagram-v2
+  [*] --> BeginnerOnly: no history / gap &gt; 7 days
+  BeginnerOnly --> BeginnerMixed: last day was beginner only
+  BeginnerMixed --> IntermediateOnly: last day was beginner + intermediate
+  IntermediateOnly --> IntermediateExpert: last day was intermediate only
+  IntermediateExpert --> IntermediateExpert: last day was intermediate + expert (cap)
+</div>
+
+<table>
+  <tr><th>Last session levels (prior day)</th><th>Next plan</th></tr>
+  <tr><td>(none)</td><td>100% beginner</td></tr>
+  <tr><td>{beginner}</td><td>50% beginner + 50% intermediate</td></tr>
+  <tr><td>{beginner, intermediate}</td><td>100% intermediate</td></tr>
+  <tr><td>{intermediate}</td><td>50% intermediate + 50% expert</td></tr>
+  <tr><td>{intermediate, expert}</td><td>50% intermediate + 50% expert (cap)</td></tr>
+</table>
+
+<h2 id="rag-build">12. Offline RAG index build (one-time setup)</h2>
+<div class="mermaid">
+flowchart LR
+  DJ[data.json 873 exercises] --> TXT[exercise_to_text per exercise]
+  TXT --> BATCH[embed_texts in batches]
+  BATCH --> NPY[rag_db/embeddings.npy]
+  BATCH --> IDX[rag_db/index.json ids]
+  BATCH --> EX[rag_db/exercises.json]
+  NPY --> READY[is_store_ready = true]
+  IDX --> READY
+  EX --> READY
+</div>
+<p>Command: <code>python -m scripts.build_embeddings</code></p>
+
+<h2 id="profile">13. Profile, history &amp; stats (non-chat APIs)</h2>
+<div class="mermaid">
+flowchart TB
+  subgraph Profile
+    P1[GET /api/profile]
+    P2[POST /api/profile height/weight]
+    P3[POST /api/profile/avatar PNG/JPG]
+  end
+
+  subgraph History
+    H1[GET /api/history → days grouped]
+    H2[DELETE /api/history → clear_history]
+  end
+
+  subgraph Stats
+    S1[GET /api/stats/muscles → pie chart totals]
+  end
+
+  P1 --> DB[(trainer.db profiles)]
+  P2 --> DB
+  P3 --> AV[(avatars/)] 
+  P3 --> DB
+  H1 --> DB
+  H2 --> DB
+  S1 --> DB
+</div>
+
+<p>Workout rows are written by <code>tools.run_plan_workout</code> / <code>run_find_exercise</code>, not by the profile APIs directly.</p>
+
+<h2 id="data">14. Data stores &amp; configuration</h2>
+<table>
+  <tr><th>Store</th><th>Path</th><th>Contents</th></tr>
+  <tr><td>Exercise catalog</td><td><code>data.json</code></td><td>Source of truth for all exercises</td></tr>
+  <tr><td>RAG index</td><td><code>rag_db/</code></td><td>Precomputed vectors + exercise copies</td></tr>
+  <tr><td>User DB</td><td><code>user_data/trainer.db</code></td><td>users, profiles, auth_tokens, workout_log</td></tr>
+  <tr><td>Avatars</td><td><code>user_data/avatars/</code></td><td>Uploaded profile images</td></tr>
+  <tr><td>Logs</td><td><code>logs/trainer.txt</code></td><td>Server, agent, RAG, storage logs</td></tr>
+  <tr><td>Config</td><td><code>.env</code></td><td>Provider, model, embed mode, daily total, etc.</td></tr>
+</table>
+
+<h3>Key .env settings</h3>
+<table>
+  <tr><th>Variable</th><th>Default</th><th>Effect</th></tr>
+  <tr><td><code>AGENT_PROVIDER</code></td><td>gemini</td><td><code>ollama</code> or <code>gemini</code></td></tr>
+  <tr><td><code>OLLAMA_MODEL</code></td><td>mistral</td><td>Local model name (e.g. ministral-3:8b)</td></tr>
+  <tr><td><code>USE_LLM_AGENT</code></td><td>true</td><td>Disable agent → chat returns 503</td></tr>
+  <tr><td><code>EMBED_MODE</code></td><td>local</td><td><code>local</code> SentenceTransformers or <code>api</code> HF</td></tr>
+  <tr><td><code>DAILY_EXERCISE_TOTAL</code></td><td>15</td><td>Default when user gives no counts</td></tr>
+  <tr><td><code>MAX_EXERCISES_PER_GROUP</code></td><td>30</td><td>Cap per muscle (e.g. "100 chest" → 30)</td></tr>
+  <tr><td><code>OLLAMA_TOOL_ROUNDS</code></td><td>1</td><td>Max tool rounds before forced summary</td></tr>
+</table>
+
+<h2 id="prompts">15. User prompt → code path map</h2>
+<table>
+  <tr>
+    <th>User says</th>
+    <th>LLM action</th>
+    <th>Backend path</th>
+    <th>DB / RAG</th>
+  </tr>
+  <tr><td>Hi / Hello</td><td>No tool</td><td>Agent text reply only</td><td>None</td></tr>
+  <tr><td>Hamstring exercises</td><td>plan_workout</td><td>normalize → embed → search → 15 default</td><td>RAG + log</td></tr>
+  <tr><td>5 chest and 3 back</td><td>plan_workout counts=[5,3]</td><td>Two _fetch_for_group calls</td><td>RAG + log ×2</td></tr>
+  <tr><td>20 shoulder exercises</td><td>plan_workout counts=[20]</td><td>Exact count, max 30 cap</td><td>RAG + log</td></tr>
+  <tr><td>Beginner chest workout</td><td>plan_workout level=beginner</td><td>Skips auto progression</td><td>RAG filtered + log</td></tr>
+  <tr><td>Barbell curls</td><td>find_exercise</td><td>find_by_name fuzzy match</td><td>Lookup + log</td></tr>
+  <tr><td>Start first exercise</td><td>No tool</td><td>LLM uses session memory of plan</td><td>None</td></tr>
+  <tr><td>Next / Skip / Repeat</td><td>No tool</td><td>LLM coaches from remembered list</td><td>None</td></tr>
+  <tr><td>View profile / chart</td><td>UI only</td><td>GET /api/profile, /stats, /history</td><td>SQLite read</td></tr>
+  <tr><td>Clear history</td><td>UI button</td><td>DELETE /api/history</td><td>SQLite delete</td></tr>
+</table>
+
+<h2>16. API endpoint summary</h2>
+<table>
+  <tr><th>Method</th><th>Path</th><th>Auth</th><th>Purpose</th></tr>
+  <tr><td>GET</td><td>/api/health</td><td>No</td><td>Status, RAG ready, provider info</td></tr>
+  <tr><td>POST</td><td>/api/auth/register</td><td>No</td><td>Create account + token</td></tr>
+  <tr><td>POST</td><td>/api/auth/login</td><td>No</td><td>Login + token</td></tr>
+  <tr><td>POST</td><td>/api/auth/logout</td><td>Optional</td><td>Invalidate token</td></tr>
+  <tr><td>POST</td><td>/api/trainer/chat</td><td>Yes</td><td>Main trainer conversation</td></tr>
+  <tr><td>GET/POST</td><td>/api/profile</td><td>Yes</td><td>Read/update height &amp; weight</td></tr>
+  <tr><td>POST</td><td>/api/profile/avatar</td><td>Yes</td><td>Upload profile image</td></tr>
+  <tr><td>GET</td><td>/api/history</td><td>Yes</td><td>Workout history by day</td></tr>
+  <tr><td>DELETE</td><td>/api/history</td><td>Yes</td><td>Clear all history</td></tr>
+  <tr><td>GET</td><td>/api/stats/muscles</td><td>Yes</td><td>All-time muscle totals (pie chart)</td></tr>
+  <tr><td>GET</td><td>/</td><td>No</td><td>Serve web/index.html</td></tr>
+</table>
+
+<p class="note">To save as PDF: open in Chrome/Edge → Ctrl+P → Save as PDF. If Mermaid diagrams do not appear in PDF, wait 2–3 seconds after page load for diagrams to render, then print. All text is plain black.</p>
+
+<script>
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: "neutral",
+    themeVariables: {
+      primaryColor: "#ffffff",
+      primaryTextColor: "#000000",
+      primaryBorderColor: "#000000",
+      lineColor: "#000000",
+      secondaryColor: "#ffffff",
+      tertiaryColor: "#ffffff",
+      fontFamily: "Arial, Helvetica, sans-serif"
+    },
+    flowchart: { htmlLabels: true, curve: "basis" }
+  });
+</script>
+</body>
+</html>

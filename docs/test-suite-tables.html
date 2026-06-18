@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI Gym Trainer — Test Suite Reference</title>
+  <style>
+    * { color: #000000 !important; background: #ffffff !important; }
+    body {
+      font-family: Arial, Helvetica, sans-serif;
+      font-size: 13px;
+      line-height: 1.45;
+      max-width: 1200px;
+      margin: 24px auto;
+      padding: 0 16px 48px;
+    }
+    h1 { font-size: 22px; margin-bottom: 6px; }
+    h2 {
+      font-size: 15px;
+      font-weight: bold;
+      margin: 26px 0 8px;
+      padding: 0;
+      border: none;
+    }
+    p, li { margin: 6px 0; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 8px 0 18px;
+      font-size: 12px;
+    }
+    th, td {
+      border: 1px solid #000000;
+      padding: 7px 9px;
+      text-align: left;
+      vertical-align: top;
+      color: #000000 !important;
+      background: #ffffff !important;
+    }
+    th { font-weight: bold; }
+    code {
+      font-family: Consolas, monospace;
+      font-size: 11px;
+      color: #000000 !important;
+      background: #ffffff !important;
+    }
+    .note { font-style: italic; margin-top: 20px; }
+    @media print {
+      body { margin: 12px; }
+      h2 { page-break-after: avoid; }
+      table { page-break-inside: avoid; }
+    }
+  </style>
+</head>
+<body>
+
+<h1>AI Gym Trainer — Test Suite Reference</h1>
+<p>All tests live under <code>tests/</code>. Run with <code>py -3.14 -m pytest</code>. Slow tests (real embedding model) are marked <code>slow</code> — skip with <code>pytest -m "not slow"</code>.</p>
+
+<h2>Summary</h2>
+<table>
+  <tr>
+    <th>Test file</th>
+    <th>Module tested</th>
+    <th>Count</th>
+    <th>Focus</th>
+  </tr>
+  <tr><td><code>test_agent_tools.py</code></td><td><code>app.agent.tools</code></td><td>26</td><td>Workout planning, image URLs, find_exercise, adaptive path</td></tr>
+  <tr><td><code>test_api.py</code></td><td><code>app.main</code> (FastAPI)</td><td>13</td><td>HTTP endpoints, auth, chat, profile, avatar</td></tr>
+  <tr><td><code>test_embeddings.py</code></td><td><code>app.embeddings</code></td><td>7</td><td>Vector helpers + real model quality (slow)</td></tr>
+  <tr><td><code>test_progression.py</code></td><td><code>app.progression</code></td><td>10</td><td>Adaptive difficulty state machine</td></tr>
+  <tr><td><code>test_rag_store.py</code></td><td><code>app.rag_store</code></td><td>11</td><td>Vector search, ranking, level filter, name lookup</td></tr>
+  <tr><td><code>test_storage.py</code></td><td><code>app.storage</code></td><td>8</td><td>SQLite users, tokens, profiles, workout logs</td></tr>
+  <tr><td colspan="2"><strong>Total</strong></td><td><strong>75</strong></td><td></td></tr>
+</table>
+
+<h2>Table 1 — test_agent_tools.py (26 tests)</h2>
+<table>
+  <tr>
+    <th>#</th>
+    <th>Test name</th>
+    <th>What is being tested</th>
+    <th>Expected behavior</th>
+  </tr>
+  <tr><td>1</td><td><code>test_distribute_single_group_gets_all</code></td><td><code>distribute()</code> with 1 muscle group</td><td>One group receives the full count (10 → [10])</td></tr>
+  <tr><td>2</td><td><code>test_distribute_two_groups_even</code></td><td>Even split across 2 groups</td><td>10 exercises → [5, 5]</td></tr>
+  <tr><td>3</td><td><code>test_distribute_three_groups_remainder_to_last</code></td><td>Remainder goes to last group</td><td>10 across 3 → [3, 3, 4]</td></tr>
+  <tr><td>4</td><td><code>test_distribute_two_groups_fifteen</code></td><td>Default daily total of 15</td><td>15 across 2 → [7, 8]</td></tr>
+  <tr><td>5</td><td><code>test_distribute_three_groups_fifteen</code></td><td>15 split evenly</td><td>15 across 3 → [5, 5, 5]</td></tr>
+  <tr><td>6</td><td><code>test_distribute_four_groups</code></td><td>Remainder on last when 4 groups</td><td>10 across 4 → [2, 2, 3, 3]</td></tr>
+  <tr><td>7</td><td><code>test_distribute_minimum_one_each</code></td><td>Minimum 1 per group</td><td>2 across 3 → [1, 1, 1] (no zero)</td></tr>
+  <tr><td>8</td><td><code>test_distribute_zero_groups</code></td><td>Edge case: zero groups</td><td>Returns empty list []</td></tr>
+  <tr><td>9</td><td><code>test_build_image_urls_prefixes_base</code></td><td>Relative image paths</td><td>Prepends CDN base URL to each path</td></tr>
+  <tr><td>10</td><td><code>test_build_image_urls_passthrough_absolute</code></td><td>Already-absolute URLs</td><td>Leaves https:// URLs unchanged</td></tr>
+  <tr><td>11</td><td><code>test_build_image_urls_handles_non_list</code></td><td>Invalid image input</td><td>None or non-list → empty list</td></tr>
+  <tr><td>12</td><td><code>test_run_plan_workout_no_counts_splits_daily_total</code></td><td>Multi-muscle, no explicit counts</td><td>Splits daily total (10) as [3, 3, 4]; collector has group + images</td></tr>
+  <tr><td>13</td><td><code>test_run_plan_workout_explicit_counts_are_honored</code></td><td>Explicit counts for all groups</td><td>[3, 2] → total 5</td></tr>
+  <tr><td>14</td><td><code>test_run_plan_workout_partial_counts_fill_remaining</code></td><td>Partial explicit counts</td><td>chest=4, back gets remaining 6</td></tr>
+  <tr><td>15</td><td><code>test_run_plan_workout_single_string_muscle</code></td><td>LLM passes muscle as string</td><td>Single "chest" string → 10 exercises</td></tr>
+  <tr><td>16</td><td><code>test_run_plan_workout_empty_returns_nothing</code></td><td>Empty muscle list</td><td>total=0, collector empty</td></tr>
+  <tr><td>17</td><td><code>test_run_plan_workout_large_explicit_count</code></td><td>Large request (20 shoulder)</td><td>Fetches 20, not clamped to daily default</td></tr>
+  <tr><td>18</td><td><code>test_run_plan_workout_three_explicit_counts_in_order</code></td><td>Compound explicit counts</td><td>10 shoulder + 10 chest + 10 legs = 30 total, order preserved</td></tr>
+  <tr><td>19</td><td><code>test_run_plan_workout_default_total_is_fifteen</code></td><td>Default when no counts</td><td>2 muscles → [7, 8] = 15 total</td></tr>
+  <tr><td>20</td><td><code>test_run_plan_workout_clamps_above_max</code></td><td>Request above MAX cap</td><td>100 requested → clamped to 30 (max per group)</td></tr>
+  <tr><td>21</td><td><code>test_user_path_auto_level_beginner_and_logs</code></td><td>Logged-in user, no history</td><td>Beginner only; workout logged to DB</td></tr>
+  <tr><td>22</td><td><code>test_user_path_progresses_next_day</code></td><td>Next-day progression</td><td>After beginner day → beginner + intermediate</td></tr>
+  <tr><td>23</td><td><code>test_user_path_unique_across_same_day</code></td><td>Same-day uniqueness</td><td>Two chest sessions same day → no duplicate exercise names</td></tr>
+  <tr><td>24</td><td><code>test_explicit_level_overrides_progression</code></td><td>User says "expert"</td><td>Explicit level overrides auto progression</td></tr>
+  <tr><td>25</td><td><code>test_run_find_exercise_found_and_logged</code></td><td><code>find_exercise</code> success</td><td>Finds "Barbell Curl", logs to biceps, adds to collector</td></tr>
+  <tr><td>26</td><td><code>test_run_find_exercise_not_found</code></td><td><code>find_exercise</code> miss</td><td>found=False, collector empty</td></tr>
+</table>
+
+<h2>Table 2 — test_api.py (13 tests)</h2>
+<table>
+  <tr>
+    <th>#</th>
+    <th>Test name</th>
+    <th>Endpoint / area</th>
+    <th>What is being tested</th>
+  </tr>
+  <tr><td>1</td><td><code>test_health_returns_expected_shape</code></td><td>GET /api/health</td><td>Response includes ok, ragReady, agentReady, provider, model, embedMode</td></tr>
+  <tr><td>2</td><td><code>test_register_then_login</code></td><td>POST /api/auth/register, /login</td><td>Register returns token; duplicate → 409; good login → 200; bad password → 401</td></tr>
+  <tr><td>3</td><td><code>test_chat_requires_auth</code></td><td>POST /api/trainer/chat</td><td>Unauthenticated chat → 401</td></tr>
+  <tr><td>4</td><td><code>test_chat_returns_reply_and_exercises</code></td><td>POST /api/trainer/chat</td><td>Authenticated chat → reply, sessionId, exercises with image URLs</td></tr>
+  <tr><td>5</td><td><code>test_chat_reuses_session</code></td><td>POST /api/trainer/chat</td><td>Same sessionId when session_id passed; messages accumulate</td></tr>
+  <tr><td>6</td><td><code>test_chat_rejects_empty_message</code></td><td>POST /api/trainer/chat</td><td>Empty message → 422 validation error</td></tr>
+  <tr><td>7</td><td><code>test_chat_503_when_store_not_ready</code></td><td>POST /api/trainer/chat</td><td>RAG not ready → 503</td></tr>
+  <tr><td>8</td><td><code>test_chat_503_when_agent_disabled</code></td><td>POST /api/trainer/chat</td><td>Agent disabled → 503</td></tr>
+  <tr><td>9</td><td><code>test_profile_get_and_update</code></td><td>GET/POST /api/profile</td><td>Read profile; update height_cm and weight_kg</td></tr>
+  <tr><td>10</td><td><code>test_profile_requires_auth</code></td><td>Profile, history, stats</td><td>Unauthenticated → 401 on profile, history, muscle stats</td></tr>
+  <tr><td>11</td><td><code>test_history_and_stats_reflect_workouts</code></td><td>GET /api/history, /api/stats/muscles</td><td>Logged workouts appear in stats totals and history (newest day first)</td></tr>
+  <tr><td>12</td><td><code>test_avatar_upload</code></td><td>POST /api/profile/avatar</td><td>Valid PNG upload → 200 with /avatars/ URL</td></tr>
+  <tr><td>13</td><td><code>test_avatar_rejects_bad_extension</code></td><td>POST /api/profile/avatar</td><td>Non-image file (.txt) → 400</td></tr>
+</table>
+
+<h2>Table 3 — test_embeddings.py (7 tests)</h2>
+<table>
+  <tr>
+    <th>#</th>
+    <th>Test name</th>
+    <th>Type</th>
+    <th>What is being tested</th>
+  </tr>
+  <tr><td>1</td><td><code>test_to_vector_normalizes</code></td><td>Fast</td><td>Raw vector [3, 4] normalized to unit length [0.6, 0.8]</td></tr>
+  <tr><td>2</td><td><code>test_to_vector_averages_token_matrix</code></td><td>Fast</td><td>2×2 token matrix mean-pooled to 2-dim unit vector</td></tr>
+  <tr><td>3</td><td><code>test_prepare_text_adds_bge_prefix</code></td><td>Fast</td><td>BGE model adds "query:" / "passage:" prefixes</td></tr>
+  <tr><td>4</td><td><code>test_prepare_text_no_prefix_for_minilm</code></td><td>Fast</td><td>MiniLM model leaves text unchanged</td></tr>
+  <tr><td>5</td><td><code>test_embedding_dimension_and_norm</code></td><td>Slow</td><td>Real model: 384-dim vectors, unit-normalized</td></tr>
+  <tr><td>6</td><td><code>test_embedding_is_deterministic</code></td><td>Slow</td><td>Same input → identical embedding twice</td></tr>
+  <tr><td>7</td><td><code>test_embedding_semantic_similarity</code></td><td>Slow</td><td>"chest workout" query scores higher vs chest exercise than calf exercise</td></tr>
+</table>
+
+<h2>Table 4 — test_progression.py (10 tests)</h2>
+<table>
+  <tr>
+    <th>#</th>
+    <th>Test name</th>
+    <th>What is being tested</th>
+    <th>Expected behavior</th>
+  </tr>
+  <tr><td>1</td><td><code>test_split_counts_even_and_remainder</code></td><td><code>split_counts()</code></td><td>Splits N exercises across levels; remainder to last</td></tr>
+  <tr><td>2</td><td><code>test_next_levels_state_machine</code></td><td><code>next_levels()</code> pure logic</td><td>beginner → beginner+intermediate → intermediate → intermediate+expert</td></tr>
+  <tr><td>3</td><td><code>test_fallback_order_prepends_planned</code></td><td><code>fallback_order()</code></td><td>Planned levels first, then other levels for top-up</td></tr>
+  <tr><td>4</td><td><code>test_no_history_starts_at_beginner</code></td><td>New user, no logs</td><td>Plan = all beginner</td></tr>
+  <tr><td>5</td><td><code>test_after_beginner_serves_beginner_plus_intermediate</code></td><td>Day after beginner-only session</td><td>50/50 beginner + intermediate</td></tr>
+  <tr><td>6</td><td><code>test_after_beginner_intermediate_serves_intermediate</code></td><td>After mixed beginner+intermediate day</td><td>All intermediate next</td></tr>
+  <tr><td>7</td><td><code>test_after_intermediate_serves_intermediate_plus_expert</code></td><td>After intermediate-only day</td><td>50/50 intermediate + expert</td></tr>
+  <tr><td>8</td><td><code>test_gap_over_seven_days_resets_to_beginner</code></td><td>10-day gap since last workout</td><td>Resets to beginner (outside 7-day window)</td></tr>
+  <tr><td>9</td><td><code>test_same_day_repeat_does_not_advance</code></td><td>Second request same muscle same day</td><td>Stays at beginner (stage from prior days only)</td></tr>
+  <tr><td>10</td><td><code>test_served_names_within_window</code></td><td><code>served_names()</code> 7-day window</td><td>Only exercises from last 7 days returned for uniqueness</td></tr>
+</table>
+
+<h2>Table 5 — test_rag_store.py (11 tests)</h2>
+<table>
+  <tr>
+    <th>#</th>
+    <th>Test name</th>
+    <th>What is being tested</th>
+    <th>Expected behavior</th>
+  </tr>
+  <tr><td>1</td><td><code>test_exercise_to_text_includes_key_fields</code></td><td><code>exercise_to_text()</code></td><td>Text includes name, muscles, instructions</td></tr>
+  <tr><td>2</td><td><code>test_cosine_similarity_identical_vectors_is_one</code></td><td>Cosine math</td><td>Identical vectors → score 1.0; orthogonal → 0.0</td></tr>
+  <tr><td>3</td><td><code>test_cosine_similarity_zero_query_returns_zeros</code></td><td>Zero query vector</td><td>All scores zero (no divide-by-zero crash)</td></tr>
+  <tr><td>4</td><td><code>test_cosine_similarity_orthogonal_and_opposite</code></td><td>Angle cases</td><td>Same=1, opposite=-1, perpendicular=0</td></tr>
+  <tr><td>5</td><td><code>test_keyword_boost_rewards_matching_primary_muscle</code></td><td><code>keyword_boost()</code></td><td>"chest" query boosts chest exercise score</td></tr>
+  <tr><td>6</td><td><code>test_keyword_boost_no_match_keeps_base</code></td><td>No keyword match</td><td>Score unchanged when query unrelated</td></tr>
+  <tr><td>7</td><td><code>test_normalize_level_maps_synonyms</code></td><td>Level aliases</td><td>basic→beginner, advanced→expert, nonsense→None</td></tr>
+  <tr><td>8</td><td><code>test_search_exercises_level_filter</code></td><td>Hard level filter</td><td>level="beginner" returns only beginner exercises</td></tr>
+  <tr><td>9</td><td><code>test_search_exercises_excludes_names</code></td><td>Exclude list</td><td>Excluded names not in results (uniqueness)</td></tr>
+  <tr><td>10</td><td><code>test_find_by_name_exact_and_fuzzy</code></td><td><code>find_by_name()</code></td><td>Exact match, substring "bench", unknown → None</td></tr>
+  <tr><td>11</td><td><code>test_search_exercises_ranks_relevant_first</code></td><td>Ranking order</td><td>Chest query ranks Bench Press first; scores descending</td></tr>
+</table>
+
+<h2>Table 6 — test_storage.py (8 tests)</h2>
+<table>
+  <tr>
+    <th>#</th>
+    <th>Test name</th>
+    <th>What is being tested</th>
+    <th>Expected behavior</th>
+  </tr>
+  <tr><td>1</td><td><code>test_create_user_and_lookup</code></td><td>User CRUD</td><td>create_user + get by username/id</td></tr>
+  <tr><td>2</td><td><code>test_duplicate_username_raises</code></td><td>Unique constraint</td><td>Duplicate username → IntegrityError</td></tr>
+  <tr><td>3</td><td><code>test_token_round_trip</code></td><td>Auth tokens</td><td>create_token → lookup user; delete → invalid</td></tr>
+  <tr><td>4</td><td><code>test_profile_upsert_merges_fields</code></td><td>Profile merge</td><td>Partial updates don't wipe other fields (height, weight, avatar)</td></tr>
+  <tr><td>5</td><td><code>test_log_and_recent_logs_window</code></td><td>7-day recent window</td><td>recent_logs only returns rows within window</td></tr>
+  <tr><td>6</td><td><code>test_history_retained_beyond_seven_days</code></td><td>Full history</td><td>Old workouts still in history_by_day (not purged)</td></tr>
+  <tr><td>7</td><td><code>test_history_by_day_grouping</code></td><td>History grouping</td><td>Grouped by day/muscle; newest first; levels + exercise names</td></tr>
+  <tr><td>8</td><td><code>test_muscle_totals_all_time</code></td><td>Muscle pie chart data</td><td>All-time counts per muscle (chest=3, biceps=1)</td></tr>
+</table>
+
+<h2>Table 7 — Coverage map (module → tests)</h2>
+<table>
+  <tr>
+    <th>App module</th>
+    <th>Responsibility</th>
+    <th>Test files</th>
+  </tr>
+  <tr><td><code>app.agent.tools</code></td><td>plan_workout, find_exercise, distribute, image URLs</td><td>test_agent_tools.py</td></tr>
+  <tr><td><code>app.main</code></td><td>FastAPI routes, auth middleware, chat sessions</td><td>test_api.py</td></tr>
+  <tr><td><code>app.embeddings</code></td><td>Sentence Transformers / HF API vectors</td><td>test_embeddings.py</td></tr>
+  <tr><td><code>app.progression</code></td><td>7-day adaptive difficulty per muscle</td><td>test_progression.py, test_agent_tools.py</td></tr>
+  <tr><td><code>app.rag_store</code></td><td>Vector search, keyword boost, find by name</td><td>test_rag_store.py, test_agent_tools.py</td></tr>
+  <tr><td><code>app.storage</code></td><td>SQLite persistence</td><td>test_storage.py, test_api.py, test_progression.py</td></tr>
+</table>
+
+<p class="note">To save as PDF: open this file in a browser → Print (Ctrl+P) → Save as PDF. Or copy all (Ctrl+A) into Word/Google Docs and export to PDF. All text is plain black with no highlighting.</p>
+
+</body>
+</html>

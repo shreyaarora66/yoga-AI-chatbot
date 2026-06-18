@@ -13,7 +13,11 @@ from app.agent.providers import (
 from app.agent.tools import (
     build_image_urls,
     distribute,
+    distribute_muscles_to_days,
+    format_daily_plan_summary,
+    format_weekly_plan_summary,
     run_find_exercise,
+    run_plan_weekly_workout,
     run_plan_workout,
     search_muscle,
 )
@@ -23,8 +27,12 @@ __all__ = [
     "OllamaConversation",
     "start_conversation",
     "run_plan_workout",
+    "run_plan_weekly_workout",
     "run_find_exercise",
     "search_muscle",
     "distribute",
+    "distribute_muscles_to_days",
+    "format_daily_plan_summary",
+    "format_weekly_plan_summary",
     "build_image_urls",
 ]

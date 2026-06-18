@@ -1,9 +1,9 @@
-"""The agent's RAG skills: build an adaptive workout plan, and look up a single
+"""The agent's RAG skills: build an adaptive workout plan, a weekly plan, and look up a single
 exercise by name.
 
 This module is provider-agnostic. Both the Gemini and Ollama providers call
-``run_plan_workout`` / ``run_find_exercise`` and read results from the shared
-``collector`` list.
+``run_plan_workout`` / ``run_plan_weekly_workout`` / ``run_find_exercise`` and read results
+from the shared ``collector`` list.
 
 When a ``user_id`` is supplied and the user did not request a specific level, the
 difficulty is chosen by ``app.progression`` from the user's last 7 days, exercises
@@ -13,7 +13,7 @@ is the original plain similarity search.
 """
 
 import logging
-from datetime import date
+from datetime import date, timedelta
 from typing import Any
 
 import numpy as np
@@ -58,6 +58,26 @@ def distribute(num_groups: int, total: int) -> list[int]:
     for i in range(num_groups - remainder, num_groups):
         counts[i] += 1
     return [max(1, c) for c in counts]
+
+
+def distribute_muscles_to_days(muscles: list[str], days: int) -> list[list[str]]:
+    """Assign muscles evenly across ``days``, preserving muscle order.
+
+    When there are at least as many muscles as days, muscles are grouped (for example
+    7 muscles over 7 days -> one muscle per day; 7 muscles over 5 days -> 1,1,1,2,2).
+    When there are fewer muscles than days, each day gets one muscle in round-robin order.
+    """
+    if not muscles or days <= 0:
+        return []
+    if len(muscles) < days:
+        return [[muscles[i % len(muscles)]] for i in range(days)]
+    per_day = distribute(days, len(muscles))
+    schedule: list[list[str]] = []
+    idx = 0
+    for n in per_day:
+        schedule.append(muscles[idx : idx + n])
+        idx += n
+    return schedule
 
 
 def _summary(exercise: dict[str, Any]) -> dict[str, Any]:
@@ -178,8 +198,10 @@ def _fetch_for_group(
     user_id: int | None,
     today: date,
     level: str | None,
+    log: bool = True,
+    day: int | None = None,
 ) -> dict[str, Any]:
-    """Resolve difficulty, fetch unique exercises for one muscle, and log them."""
+    """Resolve difficulty, fetch unique exercises for one muscle, and optionally log them."""
     muscle = str(muscle or "").strip()
     safe_count = max(1, min(int(count), get_max_per_group()))
     if not muscle:
@@ -220,11 +242,13 @@ def _fetch_for_group(
         tagged = dict(summary)
         tagged["group"] = muscle
         tagged["images"] = build_image_urls(exercise.get("images"))
+        if day is not None:
+            tagged["day"] = day
         collector.append(tagged)
 
         log_items.append((exercise.get("level"), exercise.get("name")))
 
-    if user_id is not None and log_items:
+    if log and user_id is not None and log_items:
         storage.log_workout(user_id, canonical, log_items, today.isoformat())
 
     levels_used = sorted({lvl for lvl, _ in log_items if lvl})
@@ -345,7 +369,143 @@ def run_plan_workout(
     ]
     total = sum(item["count"] for item in plan)
     logger.info("TOOL plan_workout returned %d exercises across %d groups", total, len(groups))
-    return {"groups": plan, "total": total}
+    result = {"groups": plan, "total": total}
+    result["summary"] = format_daily_plan_summary(result)
+    return result
+
+
+def format_daily_plan_summary(plan: dict[str, Any]) -> str:
+    """Plain-text daily plan listing every exercise name from a plan_workout result."""
+    groups = plan.get("groups") or []
+    if not groups:
+        return "I could not build a workout plan. Try naming different muscle groups."
+
+    lines = ["Here is your workout plan for today.", ""]
+    for group in groups:
+        muscle = group.get("muscle") or "exercise"
+        exercises = group.get("exercises") or []
+        lines.append(f"{muscle.title()} ({len(exercises)} exercises):")
+        for index, exercise in enumerate(exercises, start=1):
+            name = exercise.get("name") or "Unknown exercise"
+            lines.append(f"  {index}. {name}")
+        lines.append("")
+    lines.append("Would you like to begin the first exercise?")
+    return "\n".join(lines).strip()
+
+
+def format_weekly_plan_summary(plan: dict[str, Any]) -> str:
+    """Plain-text weekly plan listing every exercise name, grouped by day."""
+    days = plan.get("days") or []
+    if not days:
+        return "I could not build a weekly plan. Try naming different muscle groups."
+
+    lines = ["Here is your 7-day workout plan.", ""]
+    for day in days:
+        day_num = day.get("day")
+        date_str = day.get("date") or ""
+        muscles = ", ".join(day.get("muscles") or [])
+        lines.append(f"Day {day_num} ({date_str}) - {muscles}:")
+        index = 1
+        for group in day.get("groups") or []:
+            muscle = group.get("muscle") or "exercise"
+            for exercise in group.get("exercises") or []:
+                name = exercise.get("name") or "Unknown exercise"
+                lines.append(f"  {index}. {name} ({muscle})")
+                index += 1
+        lines.append("")
+    lines.append("Would you like to start day 1 with the first exercise?")
+    return "\n".join(lines).strip()
+
+
+def run_plan_weekly_workout(
+    muscles: Any,
+    collector: list[dict[str, Any]],
+    *,
+    days: int = 7,
+    exercises_per_day: int | None = None,
+    user_id: int | None = None,
+    today: date | None = None,
+    level: str | None = None,
+) -> dict[str, Any]:
+    """Build a multi-day plan: muscles are spread evenly across days; each day gets
+    ``exercises_per_day`` exercises split evenly across that day's muscles.
+
+    Workouts are fetched for preview only (not logged) so history stays accurate until
+    the user actually trains.
+    """
+    today = today or date.today()
+    per_day_total = exercises_per_day if exercises_per_day is not None else get_daily_total()
+    num_days = max(1, min(int(days), 7))
+
+    if isinstance(muscles, str):
+        muscles = [muscles]
+    raw = [str(m).strip() for m in (muscles or []) if str(m).strip()]
+    groups = normalize_muscles(raw)
+
+    logger.info(
+        "TOOL plan_weekly_workout(muscles=%s, days=%d, per_day=%d, level=%s, user=%s)",
+        groups,
+        num_days,
+        per_day_total,
+        level,
+        user_id,
+    )
+    if not groups:
+        return {"days": [], "total": 0}
+
+    schedule = distribute_muscles_to_days(groups, num_days)
+    week: list[dict[str, Any]] = []
+    grand_total = 0
+
+    for day_index, day_muscles in enumerate(schedule, start=1):
+        if not day_muscles:
+            continue
+        day_counts = distribute(len(day_muscles), per_day_total)
+        day_date = today + timedelta(days=day_index - 1)
+        day_groups: list[dict[str, Any]] = []
+
+        for muscle, count in zip(day_muscles, day_counts):
+            day_groups.append(
+                _fetch_for_group(
+                    muscle,
+                    count,
+                    collector,
+                    user_id=user_id,
+                    today=day_date,
+                    level=level,
+                    log=False,
+                    day=day_index,
+                )
+            )
+
+        day_total = sum(item["count"] for item in day_groups)
+        grand_total += day_total
+        week.append(
+            {
+                "day": day_index,
+                "date": day_date.isoformat(),
+                "muscles": day_muscles,
+                "groups": day_groups,
+                "total": day_total,
+            }
+        )
+        logger.info(
+            "  day %d (%s): muscles=%s counts=%s -> %d exercises",
+            day_index,
+            day_date.isoformat(),
+            day_muscles,
+            day_counts,
+            day_total,
+        )
+
+    logger.info(
+        "TOOL plan_weekly_workout returned %d exercises across %d days",
+        grand_total,
+        len(week),
+    )
+    result = {"days": week, "total": grand_total}
+    result["summary"] = format_weekly_plan_summary(result)
+    return result
 
 
 def run_find_exercise(

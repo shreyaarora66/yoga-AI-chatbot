@@ -48,6 +48,37 @@ def test_distribute_zero_groups():
 
 
 # --------------------------------------------------------------------------- #
+# distribute_muscles_to_days()
+# --------------------------------------------------------------------------- #
+def test_distribute_muscles_to_days_one_per_day():
+    muscles = ["a", "b", "c", "d", "e", "f", "g"]
+    assert tools.distribute_muscles_to_days(muscles, 7) == [
+        ["a"],
+        ["b"],
+        ["c"],
+        ["d"],
+        ["e"],
+        ["f"],
+        ["g"],
+    ]
+
+
+def test_distribute_muscles_to_days_five_days_seven_muscles():
+    muscles = ["a", "b", "c", "d", "e", "f", "g"]
+    assert tools.distribute_muscles_to_days(muscles, 5) == [
+        ["a"],
+        ["b"],
+        ["c"],
+        ["d", "e"],
+        ["f", "g"],
+    ]
+
+
+def test_distribute_muscles_to_days_empty():
+    assert tools.distribute_muscles_to_days([], 7) == []
+
+
+# --------------------------------------------------------------------------- #
 # build_image_urls()
 # --------------------------------------------------------------------------- #
 def test_build_image_urls_prefixes_base(monkeypatch):
@@ -195,6 +226,114 @@ def test_run_plan_workout_clamps_above_max(monkeypatch):
     collector: list[dict] = []
     result = tools.run_plan_workout(["shoulder"], [100], collector)
     assert result["groups"][0]["count"] == 30
+
+
+# --------------------------------------------------------------------------- #
+# run_plan_weekly_workout()
+# --------------------------------------------------------------------------- #
+def test_run_plan_weekly_workout_seven_muscles_seven_days(monkeypatch):
+    _stub_rag(monkeypatch)
+    monkeypatch.setattr(tools, "get_daily_total", lambda: 15)
+    monkeypatch.setattr(tools, "get_max_per_group", lambda: 30)
+    collector: list[dict] = []
+    muscles = [
+        "shoulders",
+        "abdominals",
+        "quadriceps",
+        "chest",
+        "triceps",
+        "biceps",
+        "hamstrings",
+    ]
+    result = tools.run_plan_weekly_workout(muscles, collector)
+
+    assert len(result["days"]) == 7
+    assert result["total"] == 105
+    assert len(collector) == 105
+    for day in result["days"]:
+        assert day["total"] == 15
+        assert len(day["muscles"]) == 1
+        assert day["groups"][0]["count"] == 15
+    assert all(ex.get("day") for ex in collector)
+
+
+def test_run_plan_weekly_workout_two_muscles_one_day_split(monkeypatch):
+    _stub_rag(monkeypatch)
+    monkeypatch.setattr(tools, "get_daily_total", lambda: 15)
+    monkeypatch.setattr(tools, "get_max_per_group", lambda: 30)
+    collector: list[dict] = []
+    # 2 muscles over 1 day -> both on day 1, 7 + 8 exercises.
+    result = tools.run_plan_weekly_workout(["chest", "shoulders"], collector, days=1)
+
+    assert len(result["days"]) == 1
+    assert result["total"] == 15
+    counts = [g["count"] for g in result["days"][0]["groups"]]
+    assert counts == [7, 8]
+
+
+def test_run_plan_weekly_workout_does_not_log(monkeypatch):
+    _stub_rag_leveled(monkeypatch)
+    monkeypatch.setattr(tools, "get_max_per_group", lambda: 30)
+    uid = storage.create_user("weekly_u", "h", "s")
+    collector: list[dict] = []
+    tools.run_plan_weekly_workout(
+        ["chest"], collector, days=1, user_id=uid, today=date(2026, 6, 15)
+    )
+    assert storage.muscle_totals(uid).get("chest", 0) == 0
+
+
+def test_format_weekly_plan_summary_lists_exercise_names():
+    plan = {
+        "days": [
+            {
+                "day": 1,
+                "date": "2026-06-18",
+                "muscles": ["shoulders"],
+                "groups": [
+                    {
+                        "muscle": "shoulders",
+                        "exercises": [{"name": "Arnold Press"}, {"name": "Side Lateral Raise"}],
+                    }
+                ],
+            },
+            {
+                "day": 2,
+                "date": "2026-06-19",
+                "muscles": ["chest"],
+                "groups": [
+                    {"muscle": "chest", "exercises": [{"name": "Push-Up"}]},
+                ],
+            },
+        ]
+    }
+    summary = tools.format_weekly_plan_summary(plan)
+    assert "Day 1 (2026-06-18) - shoulders:" in summary
+    assert "1. Arnold Press (shoulders)" in summary
+    assert "2. Side Lateral Raise (shoulders)" in summary
+    assert "Day 2 (2026-06-19) - chest:" in summary
+    assert "1. Push-Up (chest)" in summary
+    assert "start day 1" in summary.lower()
+
+
+def test_run_plan_weekly_workout_includes_summary(monkeypatch):
+    _stub_rag(monkeypatch)
+    monkeypatch.setattr(tools, "get_daily_total", lambda: 15)
+    monkeypatch.setattr(tools, "get_max_per_group", lambda: 30)
+    collector: list[dict] = []
+    result = tools.run_plan_weekly_workout(["shoulders"], collector, days=1)
+    assert "summary" in result
+    assert "shoulders-ex-0" in result["summary"]
+    assert "Day 1" in result["summary"]
+
+
+def test_run_plan_workout_includes_summary(monkeypatch):
+    _stub_rag(monkeypatch)
+    monkeypatch.setattr(tools, "get_daily_total", lambda: 2)
+    collector: list[dict] = []
+    result = tools.run_plan_workout(["chest"], [], collector)
+    assert "summary" in result
+    assert "chest-ex-0" in result["summary"]
+    assert "begin the first exercise" in result["summary"].lower()
 
 
 # --------------------------------------------------------------------------- #

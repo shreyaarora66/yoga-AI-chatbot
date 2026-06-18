@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI Gym Trainer — Prompt vs Expected Behavior</title>
+  <style>
+    * { color: #000000 !important; background: #ffffff !important; }
+    body {
+      font-family: Arial, Helvetica, sans-serif;
+      font-size: 14px;
+      line-height: 1.5;
+      max-width: 1200px;
+      margin: 24px auto;
+      padding: 0 16px 48px;
+    }
+    h1, h2, h3, p, li, td, th, span, strong { color: #000000 !important; }
+    h1 { font-size: 22px; margin-bottom: 8px; }
+    h2 {
+      font-size: 16px;
+      font-weight: bold;
+      margin: 28px 0 10px;
+      padding: 0;
+      border: none;
+      background: #ffffff !important;
+    }
+    p, li { margin: 6px 0; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 10px 0 20px;
+      font-size: 13px;
+    }
+    th, td {
+      border: 1px solid #000000;
+      padding: 8px 10px;
+      text-align: left;
+      vertical-align: top;
+      color: #000000 !important;
+      background: #ffffff !important;
+    }
+    th { font-weight: bold; }
+    code {
+      font-family: Consolas, monospace;
+      color: #000000 !important;
+      background: #ffffff !important;
+    }
+    .note { font-style: italic; margin-top: 24px; }
+  </style>
+</head>
+<body>
+
+<h1>AI Gym Trainer — Prompt vs Expected Behavior</h1>
+<p>Copy any table below into Word, Google Docs, or your assignment. All text is plain black with no highlighting.</p>
+
+<h2>Table 1 — Greeting and conversation (no tool)</h2>
+<table>
+  <tr>
+    <th>#</th>
+    <th>User prompt (example)</th>
+    <th>Tool</th>
+    <th>LLM expected behavior</th>
+    <th>Exercises returned</th>
+    <th>Logged to DB</th>
+  </tr>
+  <tr><td>1</td><td>Hi / Hello / Hey trainer</td><td>None</td><td>Warm greeting; asks which muscles to target</td><td>0</td><td>No</td></tr>
+  <tr><td>2</td><td>How are you?</td><td>None</td><td>Friendly reply; steers toward workout planning</td><td>0</td><td>No</td></tr>
+  <tr><td>3</td><td>What can you do?</td><td>None</td><td>Explains workout planning capability</td><td>0</td><td>No</td></tr>
+  <tr><td>4</td><td>I want to work out (vague)</td><td>None</td><td>Asks which muscles and how many exercises</td><td>0</td><td>No</td></tr>
+  <tr><td>5</td><td>Yes / Let's start / Next</td><td>None</td><td>Guides current or next exercise from session memory</td><td>0</td><td>No</td></tr>
+  <tr><td>6</td><td>Repeat that exercise</td><td>None</td><td>Re-reads steps for current exercise</td><td>0</td><td>No</td></tr>
+  <tr><td>7</td><td>Skip this one</td><td>None</td><td>Moves to next exercise in plan</td><td>0</td><td>No</td></tr>
+  <tr><td>8</td><td>I'm done / Stop / Finish</td><td>None</td><td>Congratulates; offers new plan</td><td>0</td><td>No</td></tr>
+  <tr><td>9</td><td>Thanks / Bye</td><td>None</td><td>Polite closing</td><td>0</td><td>No</td></tr>
+</table>
+
+<h2>Table 2 — Single muscle (plan_workout)</h2>
+<table>
+  <tr>
+    <th>#</th>
+    <th>User prompt (example)</th>
+    <th>Expected tool call</th>
+    <th>Count logic</th>
+    <th>Difficulty</th>
+    <th>Exercises returned</th>
+    <th>Logged to DB</th>
+  </tr>
+  <tr><td>10</td><td>Give me hamstring exercises</td><td>muscles=["hamstring"], counts=[]</td><td>15 (daily default)</td><td>Auto (7-day history)</td><td>15</td><td>Yes</td></tr>
+  <tr><td>11</td><td>Give me chest workout</td><td>muscles=["chest"], counts=[]</td><td>15</td><td>Auto</td><td>15</td><td>Yes</td></tr>
+  <tr><td>12</td><td>Give me 5 chest exercises</td><td>muscles=["chest"], counts=[5]</td><td>5 exact</td><td>Auto</td><td>5</td><td>Yes</td></tr>
+  <tr><td>13</td><td>20 shoulder exercises</td><td>muscles=["shoulder"], counts=[20]</td><td>20 exact</td><td>Auto</td><td>20</td><td>Yes</td></tr>
+  <tr><td>14</td><td>100 bicep exercises</td><td>muscles=["biceps"], counts=[100]</td><td>30 (MAX cap)</td><td>Auto</td><td>30</td><td>Yes</td></tr>
+  <tr><td>15</td><td>5 beginner chest exercises</td><td>counts=[5], level="beginner"</td><td>5</td><td>Beginner only</td><td>5</td><td>Yes</td></tr>
+  <tr><td>16</td><td>Intermediate back workout</td><td>muscles=["back"], level="intermediate"</td><td>15</td><td>Intermediate only</td><td>15</td><td>Yes</td></tr>
+  <tr><td>17</td><td>Expert leg exercises</td><td>muscles=["legs"], level="expert"</td><td>15</td><td>Expert</td><td>15</td><td>Yes</td></tr>
+  <tr><td>18</td><td>Advanced shoulder workout</td><td>level="expert" (advanced mapped)</td><td>Per counts</td><td>Expert</td><td>Per counts</td><td>Yes</td></tr>
+</table>
+
+<h2>Table 3 — Multiple muscles (plan_workout)</h2>
+<table>
+  <tr>
+    <th>#</th>
+    <th>User prompt (example)</th>
+    <th>Expected tool call</th>
+    <th>Count logic</th>
+    <th>Exercises returned</th>
+    <th>Logged to DB</th>
+  </tr>
+  <tr><td>19</td><td>Chest and back workout</td><td>muscles=["chest","back"], counts=[]</td><td>7 + 8 (15 split)</td><td>15</td><td>Yes</td></tr>
+  <tr><td>20</td><td>Shoulder, chest and legs</td><td>muscles=["shoulder","chest","legs"], counts=[]</td><td>5 + 5 + 5</td><td>15</td><td>Yes</td></tr>
+  <tr><td>21</td><td>5 chest and 3 hamstring exercises</td><td>muscles=["chest","hamstring"], counts=[5,3]</td><td>5 + 3 exact</td><td>8</td><td>Yes</td></tr>
+  <tr><td>22</td><td>10 shoulder, 10 chest and 10 leg</td><td>counts=[10,10,10]</td><td>10 + 10 + 10</td><td>30</td><td>Yes</td></tr>
+  <tr><td>23</td><td>10 shoulder and some back</td><td>muscles=["shoulder","back"], counts=[10]</td><td>10 + 5 remainder</td><td>15</td><td>Yes</td></tr>
+  <tr><td>24</td><td>5 chest and 5 back at intermediate</td><td>counts=[5,5], level="intermediate"</td><td>5 + 5</td><td>10</td><td>Yes</td></tr>
+  <tr><td>25</td><td>3 bicep and 3 tricep exercises</td><td>muscles=["biceps","triceps"], counts=[3,3]</td><td>3 + 3</td><td>6</td><td>Yes</td></tr>
+</table>
+<p><strong>Order rule:</strong> Muscles and counts align by position — first number maps to first muscle.</p>
+
+<h2>Table 4 — Muscle aliases and groups</h2>
+<table>
+  <tr>
+    <th>#</th>
+    <th>User prompt (example)</th>
+    <th>LLM may pass</th>
+    <th>Backend normalizes to</th>
+    <th>Tool</th>
+  </tr>
+  <tr><td>26</td><td>Hamstring exercises</td><td>"hamstring"</td><td>hamstrings</td><td>plan_workout</td></tr>
+  <tr><td>27</td><td>Abs workout</td><td>"abs"</td><td>abdominals</td><td>plan_workout</td></tr>
+  <tr><td>28</td><td>Quad exercises</td><td>"quads"</td><td>quadriceps</td><td>plan_workout</td></tr>
+  <tr><td>29</td><td>Delts / shoulder</td><td>"shoulder" / "delts"</td><td>shoulders</td><td>plan_workout</td></tr>
+  <tr><td>30</td><td>Leg day</td><td>"legs"</td><td>legs or sub-groups</td><td>plan_workout</td></tr>
+  <tr><td>31</td><td>Arm workout</td><td>"arms"</td><td>biceps, triceps, forearms</td><td>plan_workout</td></tr>
+  <tr><td>32</td><td>Back exercises</td><td>"back"</td><td>lats, middle back, lower back</td><td>plan_workout</td></tr>
+</table>
+
+<h2>Table 5 — Weekly plan (plan_weekly_workout)</h2>
+<table>
+  <tr>
+    <th>#</th>
+    <th>User prompt (example)</th>
+    <th>Expected tool call</th>
+    <th>Muscle distribution</th>
+    <th>Exercises per day</th>
+    <th>Total exercises</th>
+    <th>Logged to DB</th>
+  </tr>
+  <tr><td>33</td><td>Make me a weekly plan for shoulders, chest and biceps</td><td>plan_weekly_workout(muscles=[...])</td><td>3 muscles cycled across 7 days (round-robin)</td><td>15 each day</td><td>105</td><td>No (preview only)</td></tr>
+  <tr><td>34</td><td>Weekly plan targeting shoulders, abdominals, quadriceps, chest, triceps, biceps, hamstrings</td><td>plan_weekly_workout with all 7 muscles in order</td><td>1 muscle per day for 7 days</td><td>15 per day</td><td>105</td><td>No</td></tr>
+  <tr><td>35</td><td>7-day beginner plan for legs and back</td><td>plan_weekly_workout, level="beginner"</td><td>Muscles spread evenly across 7 days</td><td>15 split across that day's muscles</td><td>7 × 15</td><td>No</td></tr>
+  <tr><td>36</td><td>Give me chest workout today</td><td>plan_workout (NOT plan_weekly_workout)</td><td>Single session</td><td>15</td><td>15</td><td>Yes</td></tr>
+</table>
+<p><strong>Weekly rules:</strong> Muscles are normalized (shoulder → shoulders, abs → abdominals). Each day gets 15 exercises split evenly across that day's muscles (2 muscles → 7 + 8). Call plan_weekly_workout once; do not also call plan_workout.</p>
+
+<h2>Table 6 — Specific exercise (find_exercise)</h2>
+<table>
+  <tr>
+    <th>#</th>
+    <th>User prompt (example)</th>
+    <th>Expected tool call</th>
+    <th>Exercises returned</th>
+    <th>Logged to DB</th>
+  </tr>
+  <tr><td>33</td><td>I want to do barbell curls</td><td>find_exercise(name="barbell curls")</td><td>1 if found</td><td>Yes</td></tr>
+  <tr><td>34</td><td>Show me push-ups</td><td>find_exercise(name="push-ups")</td><td>1</td><td>Yes</td></tr>
+  <tr><td>35</td><td>Let me do bench press</td><td>find_exercise(name="bench press")</td><td>1</td><td>Yes</td></tr>
+  <tr><td>36</td><td>Random exercise xyz123</td><td>find_exercise(name="xyz123")</td><td>0 (not found)</td><td>No</td></tr>
+</table>
+
+<h2>Table 7 — Adaptive difficulty (auto level, logged-in user)</h2>
+<table>
+  <tr>
+    <th>#</th>
+    <th>User history (same muscle)</th>
+    <th>User prompt</th>
+    <th>Expected difficulty mix</th>
+  </tr>
+  <tr><td>38</td><td>No history or gap greater than 7 days</td><td>5 chest exercises</td><td>Beginner only</td></tr>
+  <tr><td>39</td><td>Last session: beginner only</td><td>5 chest again (new day)</td><td>Beginner + intermediate</td></tr>
+  <tr><td>40</td><td>Last session: beginner + intermediate</td><td>5 chest</td><td>Intermediate only</td></tr>
+  <tr><td>41</td><td>Last session: intermediate only</td><td>5 chest</td><td>Intermediate + expert</td></tr>
+  <tr><td>42</td><td>Same muscle again same day</td><td>5 more chest</td><td>Same stage; different exercises (uniqueness)</td></tr>
+  <tr><td>43</td><td>User says beginner chest</td><td>Explicit level</td><td>Overrides auto progression</td></tr>
+</table>
+
+<h2>Table 8 — Uniqueness and shortage behavior</h2>
+<table>
+  <tr>
+    <th>#</th>
+    <th>Scenario</th>
+    <th>Expected behavior</th>
+  </tr>
+  <tr><td>44</td><td>User got 5 chest Monday; asks 5 chest again Monday</td><td>5 new chest names (exclude 7-day window)</td></tr>
+  <tr><td>45</td><td>Not enough unique beginner chest left</td><td>Fills from fallback levels (intermediate, expert)</td></tr>
+  <tr><td>46</td><td>Still not enough unique exercises</td><td>May allow repeats to meet requested count</td></tr>
+  <tr><td>47</td><td>First chat ever (cold start)</td><td>Embedding model loads once; then normal RAG</td></tr>
+</table>
+
+<h2>Table 9 — Not handled via chat (use UI or other APIs)</h2>
+<table>
+  <tr>
+    <th>#</th>
+    <th>User action</th>
+    <th>Handled by</th>
+  </tr>
+  <tr><td>48</td><td>Register / Login</td><td>POST /api/auth/register or /login</td></tr>
+  <tr><td>49</td><td>View profile / pie chart</td><td>Profile tab: GET /api/profile, /api/stats/muscles</td></tr>
+  <tr><td>50</td><td>View workout history</td><td>GET /api/history</td></tr>
+  <tr><td>51</td><td>Clear all history</td><td>Profile Clear history: DELETE /api/history</td></tr>
+  <tr><td>52</td><td>Upload avatar</td><td>POST /api/profile/avatar</td></tr>
+  <tr><td>53</td><td>Update height/weight</td><td>POST /api/profile</td></tr>
+  <tr><td>54</td><td>Diet / injury / general knowledge</td><td>LLM text only; no tool</td></tr>
+</table>
+
+<h2>Table 10 — Master summary</h2>
+<table>
+  <tr>
+    <th>User prompt type</th>
+    <th>Tool</th>
+    <th>Typical params</th>
+    <th>Exercise count</th>
+    <th>User sees</th>
+  </tr>
+  <tr><td>Greeting</td><td>None</td><td>—</td><td>0</td><td>Text reply</td></tr>
+  <tr><td>1 muscle, no count</td><td>plan_workout</td><td>1 muscle, counts=[]</td><td>15</td><td>Text + 15 cards</td></tr>
+  <tr><td>1 muscle, N count</td><td>plan_workout</td><td>counts=[N]</td><td>N</td><td>Text + N cards</td></tr>
+  <tr><td>2+ muscles, no counts</td><td>plan_workout</td><td>counts=[]</td><td>15 total</td><td>Text + 15 cards</td></tr>
+  <tr><td>2+ muscles, explicit counts</td><td>plan_workout</td><td>aligned counts</td><td>sum of counts</td><td>Text + cards</td></tr>
+  <tr><td>Explicit difficulty</td><td>plan_workout</td><td>level set</td><td>per counts</td><td>Filtered by level</td></tr>
+  <tr><td>Named exercise</td><td>find_exercise</td><td>name</td><td>0 or 1</td><td>Text + 0–1 card</td></tr>
+  <tr><td>Weekly plan (multiple muscles)</td><td>plan_weekly_workout</td><td>muscles list</td><td>7 × 15 (105)</td><td>Text + up to 105 cards</td></tr>
+  <tr><td>Next / repeat / stop</td><td>None</td><td>—</td><td>0</td><td>Coaching text</td></tr>
+</table>
+
+<p class="note">Open this file in a browser, select all (Ctrl+A), copy (Ctrl+C), and paste into Word or Google Docs. All text will stay black with no table highlighting.</p>
+
+</body>
+</html>

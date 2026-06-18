@@ -27,10 +27,11 @@ from app.config import (
 )
 from app.agent.prompts import (
     FIND_EXERCISE_DESCRIPTION,
+    PLAN_WEEKLY_WORKOUT_DESCRIPTION,
     PLAN_WORKOUT_DESCRIPTION,
     SYSTEM_INSTRUCTION,
 )
-from app.agent.tools import run_find_exercise, run_plan_workout
+from app.agent.tools import run_find_exercise, run_plan_weekly_workout, run_plan_workout
 
 logger = logging.getLogger("trainer.agent")
 
@@ -52,7 +53,11 @@ def _get_gemini_client():
     return _gemini_client
 
 
-def _make_gemini_tools(collector: list[dict[str, Any]], user_id: int | None):
+def _make_gemini_tools(
+    collector: list[dict[str, Any]],
+    user_id: int | None,
+    summary_holder: dict[str, str | None],
+):
     # NOTE: keep the return annotations as bare `dict`. With automatic function
     # calling, google-genai runs isinstance() against them; `dict[str, Any]` is not
     # a valid isinstance type and breaks tool calling.
@@ -81,9 +86,12 @@ def _make_gemini_tools(collector: list[dict[str, Any]], user_id: int | None):
             a list of exercises (name, level, equipment, primary muscles, and an
             ordered list of instruction steps).
         """
-        return run_plan_workout(
+        result = run_plan_workout(
             muscles, counts, collector, user_id=user_id, today=date.today(), level=level or None
         )
+        if result.get("summary"):
+            summary_holder["text"] = result["summary"]
+        return result
 
     def find_exercise(name: str) -> dict:
         """Look up ONE specific exercise the user named, by its name.
@@ -100,10 +108,38 @@ def _make_gemini_tools(collector: list[dict[str, Any]], user_id: int | None):
         """
         return run_find_exercise(name, collector, user_id=user_id, today=date.today())
 
-    return [plan_workout, find_exercise]
+    def plan_weekly_workout(muscles: list[str], level: str = "") -> dict:
+        """Build a 7-day weekly workout plan by searching the exercise database.
+
+        Call this exactly ONCE when the user asks for a weekly plan. Muscles are spread
+        evenly across 7 days; each day gets 15 exercises split across that day's muscles.
+
+        Args:
+            muscles: All muscle groups to cover this week, in the order the user said
+                them, for example ["shoulders", "chest", "biceps", "hamstrings"].
+            level: Optional difficulty: "beginner", "intermediate" or "expert"
+                (map "advanced" -> expert). Leave empty when the user does not say
+                a level; the system then auto-picks difficulty from their history.
+
+        Returns:
+            A dictionary with a "days" list (each day has date, muscles, groups, total)
+            and overall "total" exercise count.
+        """
+        result = run_plan_weekly_workout(
+            muscles, collector, user_id=user_id, today=date.today(), level=level or None
+        )
+        if result.get("summary"):
+            summary_holder["text"] = result["summary"]
+        return result
+
+    return [plan_workout, plan_weekly_workout, find_exercise]
 
 
-def _create_gemini_chat(collector: list[dict[str, Any]], user_id: int | None):
+def _create_gemini_chat(
+    collector: list[dict[str, Any]],
+    user_id: int | None,
+    summary_holder: dict[str, str | None],
+):
     from google.genai import types
 
     client = _get_gemini_client()
@@ -111,7 +147,7 @@ def _create_gemini_chat(collector: list[dict[str, Any]], user_id: int | None):
         model=get_model_name(),
         config=types.GenerateContentConfig(
             system_instruction=SYSTEM_INSTRUCTION,
-            tools=_make_gemini_tools(collector, user_id),
+            tools=_make_gemini_tools(collector, user_id, summary_holder),
             temperature=0.5,
         ),
     )
@@ -121,14 +157,19 @@ class GeminiConversation:
     def __init__(self, user_id: int | None = None) -> None:
         self.user_id = user_id
         self._collector: list[dict[str, Any]] = []
-        self._chat = _create_gemini_chat(self._collector, user_id)
+        self._summary_holder: dict[str, str | None] = {"text": None}
+        self._chat = _create_gemini_chat(self._collector, user_id, self._summary_holder)
 
     def send(self, text: str) -> tuple[str, list[dict[str, Any]]]:
         self._collector.clear()
+        self._summary_holder["text"] = None
         logger.info("USER -> %r", text)
         started = time.perf_counter()
         response = self._chat.send_message(text)
         reply = (getattr(response, "text", None) or "").strip()
+        tool_summary = self._summary_holder.get("text")
+        if tool_summary:
+            reply = tool_summary
         elapsed_s = time.perf_counter() - started
         logger.info(
             "GEMINI -> %r (tool exercises=%d, %.1f s)",
@@ -187,6 +228,36 @@ OLLAMA_TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "plan_weekly_workout",
+            "description": PLAN_WEEKLY_WORKOUT_DESCRIPTION,
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "muscles": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": (
+                            "All muscle groups to cover this week, in the order the user "
+                            "said them, e.g. [\"shoulders\", \"chest\", \"biceps\"]."
+                        ),
+                    },
+                    "level": {
+                        "type": "string",
+                        "enum": ["beginner", "intermediate", "expert"],
+                        "description": (
+                            "Optional difficulty. Map 'advanced' to 'expert'. Leave empty "
+                            "when the user does not state a level; difficulty is then "
+                            "auto-selected from their training history."
+                        ),
+                    },
+                },
+                "required": ["muscles"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "find_exercise",
             "description": FIND_EXERCISE_DESCRIPTION,
             "parameters": {
@@ -217,6 +288,18 @@ def _tool_plan_workout(
     )
 
 
+def _tool_plan_weekly_workout(
+    args: dict[str, Any], collector: list[dict[str, Any]], user_id: int | None, today: date
+) -> dict[str, Any]:
+    return run_plan_weekly_workout(
+        args.get("muscles"),
+        collector,
+        user_id=user_id,
+        today=today,
+        level=args.get("level") or None,
+    )
+
+
 def _tool_find_exercise(
     args: dict[str, Any], collector: list[dict[str, Any]], user_id: int | None, today: date
 ) -> dict[str, Any]:
@@ -225,6 +308,7 @@ def _tool_find_exercise(
 
 OLLAMA_TOOL_REGISTRY = {
     "plan_workout": _tool_plan_workout,
+    "plan_weekly_workout": _tool_plan_weekly_workout,
     "find_exercise": _tool_find_exercise,
 }
 
@@ -298,38 +382,26 @@ class OllamaConversation:
             {"role": "system", "content": SYSTEM_INSTRUCTION}
         ]
 
-    def _dedupe(self) -> list[dict[str, Any]]:
-        seen: set[Any] = set()
-        unique: list[dict[str, Any]] = []
-        for exercise in self._collector:
-            name = exercise.get("name")
-            if name in seen:
-                continue
-            seen.add(name)
-            unique.append(exercise)
-        return unique
-
     def send(self, text: str) -> tuple[str, list[dict[str, Any]]]:
         self._collector.clear()
         today = date.today()
         self._messages.append({"role": "user", "content": text})
         logger.info("USER -> %r", text)
         chat_started = time.perf_counter()
+        tool_summary: str | None = None
 
         message: dict[str, Any] = {}
-        # After the tool-call budget we do one final round that nudges the model
-        # to stop calling tools and summarise. Any tool calls it still emits on
-        # that final round are ignored.
         for round_index in range(self.tool_round_budget + 1):
             is_final = round_index == self.tool_round_budget
-            if is_final:
+            if is_final and not tool_summary:
                 self._messages.append(
                     {
                         "role": "user",
                         "content": (
                             "You now have all the exercise data you need. Do NOT call "
-                            "any more tools. Give me a short, friendly summary of the "
-                            "plan you fetched and ask if I want to start the first exercise."
+                            "any more tools. Read the summary field from the tool result "
+                            "and present every exercise name grouped by muscle or day. "
+                            "Ask if I want to start the first exercise."
                         ),
                     }
                 )
@@ -339,36 +411,58 @@ class OllamaConversation:
             self._messages.append(message)
 
             tool_calls = message.get("tool_calls") or []
-            if is_final or not tool_calls:
-                reply = (message.get("content") or "").strip()
-                elapsed_s = time.perf_counter() - chat_started
-                logger.info(
-                    "OLLAMA%s -> %r (exercises=%d, rounds=%d, %.1f s)",
-                    " (forced final)" if is_final else "",
-                    reply[:200] + ("..." if len(reply) > 200 else ""),
-                    len(self._collector),
-                    round_index + 1,
-                    elapsed_s,
-                )
-                if not reply:
-                    reply = "Here is your plan. Would you like to begin the first exercise?"
-                return reply, self._dedupe()
+            if tool_calls:
+                for call in tool_calls:
+                    name = (call.get("function", {}) or {}).get("name")
+                    result = _execute_ollama_tool_call(
+                        call, self._collector, self.user_id, today
+                    )
+                    summary = result.get("summary")
+                    if summary and name in ("plan_workout", "plan_weekly_workout"):
+                        tool_summary = summary
+                    self._messages.append(
+                        {
+                            "role": "tool",
+                            "tool_name": name,
+                            "name": name,
+                            "content": json.dumps(result),
+                        }
+                    )
+                if tool_summary:
+                    reply = tool_summary.strip()
+                    elapsed_s = time.perf_counter() - chat_started
+                    logger.info(
+                        "OLLAMA (tool summary) -> %r (exercises=%d, rounds=%d, %.1f s)",
+                        reply[:200] + ("..." if len(reply) > 200 else ""),
+                        len(self._collector),
+                        round_index + 1,
+                        elapsed_s,
+                    )
+                    return reply, list(self._collector)
+                continue
 
-            for call in tool_calls:
-                name = (call.get("function", {}) or {}).get("name")
-                result = _execute_ollama_tool_call(call, self._collector, self.user_id, today)
-                self._messages.append(
-                    {
-                        "role": "tool",
-                        "tool_name": name,
-                        "name": name,
-                        "content": json.dumps(result),
-                    }
+            reply = (message.get("content") or "").strip()
+            elapsed_s = time.perf_counter() - chat_started
+            logger.info(
+                "OLLAMA%s -> %r (exercises=%d, rounds=%d, %.1f s)",
+                " (forced final)" if is_final else "",
+                reply[:200] + ("..." if len(reply) > 200 else ""),
+                len(self._collector),
+                round_index + 1,
+                elapsed_s,
+            )
+            if not reply:
+                reply = tool_summary or (
+                    "Here is your plan. Would you like to begin the first exercise?"
                 )
+            elif tool_summary:
+                reply = tool_summary
+            return reply, list(self._collector)
 
         return (
-            "Here is your plan. Would you like to begin the first exercise?",
-            self._dedupe(),
+            tool_summary
+            or "Here is your plan. Would you like to begin the first exercise?",
+            list(self._collector),
         )
 
 

@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI Gym Trainer — User Prompt Flows</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <style>
+    * { color: #000000 !important; background: #ffffff !important; }
+    body {
+      font-family: Arial, Helvetica, sans-serif;
+      font-size: 13px;
+      line-height: 1.5;
+      max-width: 1100px;
+      margin: 24px auto;
+      padding: 0 16px 48px;
+    }
+    h1 { font-size: 22px; margin-bottom: 6px; }
+    h2 {
+      font-size: 15px;
+      font-weight: bold;
+      margin: 28px 0 10px;
+    }
+    h3 { font-size: 13px; font-weight: bold; margin: 14px 0 8px; }
+    p, li { margin: 6px 0; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 10px 0 18px;
+      font-size: 12px;
+    }
+    th, td {
+      border: 1px solid #000000;
+      padding: 7px 9px;
+      text-align: left;
+      vertical-align: top;
+    }
+    th { font-weight: bold; }
+    .mermaid {
+      border: 1px solid #000;
+      padding: 12px;
+      margin: 12px 0 20px;
+      overflow-x: auto;
+    }
+    .example {
+      font-style: italic;
+      margin: 4px 0 10px;
+    }
+    .note { font-style: italic; margin-top: 20px; }
+    @media print {
+      body { margin: 12px; }
+      h2 { page-break-after: avoid; }
+      .mermaid { page-break-inside: avoid; }
+    }
+  </style>
+</head>
+<body>
+
+<h1>AI Gym Trainer — User Prompt Flows</h1>
+<p>This document shows <strong>only what happens when the user types different prompts</strong> — from greeting to workout coaching. No APIs or backend details.</p>
+
+<h2>Master flow — all prompt types</h2>
+<div class="mermaid">
+flowchart TD
+  START([User sends a message]) --> TYPE{What kind of prompt?}
+
+  TYPE -->|Greeting / small talk| G[Trainer replies warmly<br/>asks which muscles to target]
+  TYPE -->|Vague workout intent| V[Trainer asks for muscles<br/>and optional counts]
+  TYPE -->|Muscle workout request| P[Trainer builds a plan<br/>shows exercise cards]
+  TYPE -->|One named exercise| F[Trainer finds that exercise<br/>shows one card]
+  TYPE -->|During workout| C[Trainer coaches step-by-step<br/>no new exercises fetched]
+  TYPE -->|End session| E[Trainer congratulates<br/>offers a new plan]
+
+  G --> WAIT([User continues])
+  V --> WAIT
+  P --> COACH{Ready to start?}
+  F --> COACH
+  COACH -->|yes / start| C
+  C --> C
+  C --> E
+  E --> WAIT
+  WAIT --> START
+</div>
+
+<h2>Pattern 1 — Greeting and conversation (no plan yet)</h2>
+<p class="example">Examples: "Hi", "Hello", "How are you?", "What can you do?"</p>
+
+<div class="mermaid">
+flowchart LR
+  U1[User: Hi] --> T1[Trainer greets warmly]
+  T1 --> T2[Asks: which muscles today?<br/>Should I make a plan?]
+  T2 --> U2[User names muscles or asks more]
+</div>
+
+<table>
+  <tr>
+    <th>User prompt</th>
+    <th>Trainer behavior</th>
+    <th>Exercises shown</th>
+  </tr>
+  <tr><td>Hi / Hello / Hey</td><td>Warm greeting; asks target muscles</td><td>None</td></tr>
+  <tr><td>How are you?</td><td>Friendly reply; steers toward planning</td><td>None</td></tr>
+  <tr><td>What can you do?</td><td>Explains it can plan workouts by muscle</td><td>None</td></tr>
+  <tr><td>I want to work out (vague)</td><td>Asks which muscles and how many</td><td>None</td></tr>
+</table>
+
+<h2>Pattern 2 — Single muscle, no count (default 15 exercises)</h2>
+<p class="example">Examples: "Give me hamstring exercises", "Chest workout", "I want a shoulder plan"</p>
+
+<div class="mermaid">
+flowchart TD
+  U[User: hamstring exercises] --> N[Trainer understands muscle: hamstring]
+  N --> S[Searches exercise database<br/>picks 15 hamstring exercises]
+  S --> L[Difficulty auto-chosen from<br/>user's recent training history]
+  S --> UQ[Skips exercises already given<br/>in the last 7 days]
+  L --> R[Trainer summarizes the plan]
+  UQ --> R
+  R --> Q[Asks: start the first exercise?]
+  Q --> CARDS[15 exercise cards appear]
+</div>
+
+<table>
+  <tr>
+    <th>User prompt</th>
+    <th>Plan size</th>
+    <th>Difficulty</th>
+  </tr>
+  <tr><td>Hamstring exercises</td><td>15 (default)</td><td>Auto from history</td></tr>
+  <tr><td>Chest workout</td><td>15</td><td>Auto</td></tr>
+  <tr><td>Back exercises</td><td>15 (may expand "back" to lats + middle back + lower back)</td><td>Auto</td></tr>
+  <tr><td>Leg day</td><td>15 split across quads, hamstrings, calves, glutes</td><td>Auto</td></tr>
+</table>
+
+<h2>Pattern 3 — Single muscle with explicit count</h2>
+<p class="example">Examples: "5 chest exercises", "20 shoulder exercises", "Give me 3 bicep moves"</p>
+
+<div class="mermaid">
+flowchart TD
+  U[User: 5 chest exercises] --> C[Trainer reads exact number: 5]
+  C --> S[Fetches exactly 5 chest exercises]
+  S --> CAP{Number very large?}
+  CAP -->|e.g. 100| MAX[Caps at 30 per muscle]
+  CAP -->|normal| OK[Uses exact count]
+  MAX --> R[Summarizes plan + cards]
+  OK --> R
+</div>
+
+<table>
+  <tr>
+    <th>User prompt</th>
+    <th>Exercises returned</th>
+    <th>Notes</th>
+  </tr>
+  <tr><td>5 chest exercises</td><td>5</td><td>Exact count honored</td></tr>
+  <tr><td>20 shoulder exercises</td><td>20</td><td>Not reduced to default 15</td></tr>
+  <tr><td>100 bicep exercises</td><td>30</td><td>Capped at maximum per muscle</td></tr>
+</table>
+
+<h2>Pattern 4 — Multiple muscles, no counts (15 split across groups)</h2>
+<p class="example">Examples: "Chest and back workout", "Shoulder, chest and legs"</p>
+
+<div class="mermaid">
+flowchart TD
+  U[User: chest and back workout] --> M[Trainer lists all muscles mentioned]
+  M --> SPLIT[Splits 15 total across groups]
+  SPLIT --> E1[e.g. chest: 7 exercises]
+  SPLIT --> E2[e.g. back: 8 exercises]
+  E1 --> R[One combined plan + 15 cards]
+  E2 --> R
+  R --> Q[Offers to start first exercise]
+</div>
+
+<table>
+  <tr>
+    <th>User prompt</th>
+    <th>Split (default 15 total)</th>
+  </tr>
+  <tr><td>Chest and back</td><td>7 chest + 8 back</td></tr>
+  <tr><td>Shoulder, chest and legs (3 groups)</td><td>5 + 5 + 5</td></tr>
+  <tr><td>Two groups (generic)</td><td>7 + 8 (remainder to last group)</td></tr>
+</table>
+
+<h2>Pattern 5 — Multiple muscles with explicit counts</h2>
+<p class="example">Examples: "5 chest and 3 hamstring", "10 shoulder, 10 chest and 10 leg"</p>
+
+<div class="mermaid">
+flowchart TD
+  U[User: 5 chest and 3 hamstring] --> A[Trainer aligns counts to muscles in order]
+  A --> G1[Fetch 5 chest]
+  A --> G2[Fetch 3 hamstring]
+  G1 --> T[Total: 8 exercises]
+  G2 --> T
+  T --> R[Summarizes both groups + 8 cards]
+</div>
+
+<table>
+  <tr>
+    <th>User prompt</th>
+    <th>Counts</th>
+    <th>Total exercises</th>
+  </tr>
+  <tr><td>5 chest and 3 hamstring</td><td>5 + 3</td><td>8</td></tr>
+  <tr><td>10 shoulder, 10 chest and 10 leg</td><td>10 + 10 + 10</td><td>30</td></tr>
+  <tr><td>10 shoulder and some back</td><td>10 explicit + remainder for back</td><td>15</td></tr>
+  <tr><td>3 bicep and 3 tricep</td><td>3 + 3</td><td>6</td></tr>
+</table>
+
+<p><strong>Order rule:</strong> First number maps to first muscle, second to second, and so on.</p>
+
+<h2>Pattern 6 — Explicit difficulty</h2>
+<p class="example">Examples: "5 beginner chest exercises", "Intermediate back workout", "Expert leg exercises"</p>
+
+<div class="mermaid">
+flowchart TD
+  U[User: 5 beginner chest exercises] --> D[Trainer reads difficulty: beginner]
+  D --> O[Overrides auto progression]
+  O --> S[Fetches 5 chest exercises<br/>all beginner level]
+  S --> R[Plan summary + 5 cards]
+</div>
+
+<table>
+  <tr>
+    <th>User says</th>
+    <th>Difficulty used</th>
+  </tr>
+  <tr><td>Beginner / basic</td><td>Beginner only</td></tr>
+  <tr><td>Intermediate / moderate</td><td>Intermediate only</td></tr>
+  <tr><td>Expert / advanced</td><td>Expert (advanced mapped to expert)</td></tr>
+  <tr><td>No level mentioned</td><td>Auto from last 7 days of training</td></tr>
+</table>
+
+<h2>Pattern 7 — Muscle aliases (same flow, different words)</h2>
+<p>The trainer understands casual names and maps them before searching.</p>
+
+<table>
+  <tr>
+    <th>User might say</th>
+    <th>Understood as</th>
+    <th>Same flow as</th>
+  </tr>
+  <tr><td>Hamstring / hams</td><td>Hamstrings</td><td>Pattern 2 or 3</td></tr>
+  <tr><td>Abs / core</td><td>Abdominals</td><td>Pattern 2 or 3</td></tr>
+  <tr><td>Quads / thighs</td><td>Quadriceps</td><td>Pattern 2 or 3</td></tr>
+  <tr><td>Delts / shoulder</td><td>Shoulders</td><td>Pattern 2 or 3</td></tr>
+  <tr><td>Arms</td><td>Biceps + triceps + forearms</td><td>Pattern 4 (split 15)</td></tr>
+  <tr><td>Back</td><td>Lats + middle back + lower back</td><td>Pattern 4 (split 15)</td></tr>
+  <tr><td>Legs / leg day</td><td>Quads + hamstrings + calves + glutes</td><td>Pattern 4 (split 15)</td></tr>
+</table>
+
+<h2>Pattern 8 — One specific exercise by name</h2>
+<p class="example">Examples: "I want to do barbell curls", "Show me push-ups", "Let me do bench press"</p>
+
+<div class="mermaid">
+flowchart TD
+  U[User: I want barbell curls] --> F[Trainer looks up that exact name]
+  F --> FOUND{Found in database?}
+  FOUND -->|yes| ONE[Returns 1 exercise + steps]
+  FOUND -->|no| NONE[Says not found;<br/>suggests another name or muscle plan]
+  ONE --> CARD[1 exercise card]
+</div>
+
+<table>
+  <tr>
+    <th>User prompt</th>
+    <th>Result</th>
+  </tr>
+  <tr><td>Barbell curls / push-ups / bench press</td><td>1 matching exercise + coaching steps</td></tr>
+  <tr><td>Unknown or nonsense name</td><td>Not found; trainer asks to try something else</td></tr>
+</table>
+
+<h2>Pattern 9 — Coaching during the workout (no new plan)</h2>
+<p class="example">After a plan exists, user guides pace through the list the trainer already has in memory.</p>
+
+<div class="mermaid">
+flowchart TD
+  PLAN[Plan already loaded in conversation] --> START[User: start first exercise]
+  START --> W1[Trainer walks through exercise 1 step by step]
+  W1 --> NEXT{User says}
+  NEXT -->|next / yes / done| W2[Trainer moves to next exercise]
+  NEXT -->|repeat / again| W1
+  NEXT -->|skip| W3[Trainer skips to following exercise]
+  NEXT -->|last exercise| WL[Trainer describes final exercise in plan]
+  W2 --> NEXT
+  W3 --> NEXT
+  WL --> FIN[User: I'm done / stop / finish]
+  FIN --> END[Trainer congratulates;<br/>offers a new workout]
+</div>
+
+<table>
+  <tr>
+    <th>User prompt</th>
+    <th>Trainer behavior</th>
+    <th>New exercises fetched?</th>
+  </tr>
+  <tr><td>Can we start with the first exercise</td><td>Step-by-step for exercise 1</td><td>No</td></tr>
+  <tr><td>Move to the next exercise</td><td>Guides exercise 2 (or next in list)</td><td>No</td></tr>
+  <tr><td>Now move to the last exercise</td><td>Jumps to final exercise in plan</td><td>No</td></tr>
+  <tr><td>Repeat that / say it again</td><td>Re-reads current exercise steps</td><td>No</td></tr>
+  <tr><td>Skip this one</td><td>Moves on without redoing</td><td>No</td></tr>
+  <tr><td>I'm done / stop / finish</td><td>Closing message; offers new plan</td><td>No</td></tr>
+  <tr><td>Thanks / bye</td><td>Polite goodbye</td><td>No</td></tr>
+</table>
+
+<h2>Pattern 10 — Adaptive difficulty (when user does not say a level)</h2>
+<p>Applies inside Patterns 2–5 whenever the user does not specify beginner/intermediate/expert.</p>
+
+<div class="mermaid">
+stateDiagram-v2
+  [*] --> BeginnerOnly: first time or 7+ day gap
+  BeginnerOnly --> Mixed1: trained beginner yesterday
+  Mixed1 --> IntermediateOnly: trained beginner+intermediate
+  IntermediateOnly --> Mixed2: trained intermediate only
+  Mixed2 --> Mixed2: trained intermediate+expert (stays at top stage)
+
+  note right of BeginnerOnly: All exercises beginner
+  note right of Mixed1: Half beginner, half intermediate
+  note right of IntermediateOnly: All intermediate
+  note right of Mixed2: Half intermediate, half expert
+</div>
+
+<table>
+  <tr>
+    <th>Situation</th>
+    <th>What the user might say</th>
+    <th>Difficulty mix</th>
+  </tr>
+  <tr><td>Brand new or long break</td><td>5 chest exercises</td><td>All beginner</td></tr>
+  <tr><td>Did beginner chest yesterday</td><td>5 chest again today</td><td>Beginner + intermediate</td></tr>
+  <tr><td>Did mixed day before</td><td>5 chest</td><td>All intermediate</td></tr>
+  <tr><td>Same muscle again same day</td><td>5 more chest</td><td>Same stage; different exercise names</td></tr>
+</table>
+
+<h2>Pattern 11 — Uniqueness (same user, repeat requests)</h2>
+<p class="example">User asks for the same muscle twice in a week.</p>
+
+<div class="mermaid">
+flowchart TD
+  U1[User: 5 chest on Monday] --> P1[5 chest exercises A–E]
+  P1 --> U2[User: 5 chest again Monday]
+  U2 --> P2[5 NEW chest exercises F–J<br/>no repeats from last 7 days]
+  P2 --> SHORT{Not enough unique left?}
+  SHORT -->|yes| FB[Pulls from other difficulty levels]
+  SHORT -->|still short| REP[May repeat old names to meet count]
+</div>
+
+<h2>Pattern 12 — What the trainer does NOT handle in chat</h2>
+<p>These are outside the prompt conversation (handled in the app UI instead).</p>
+
+<table>
+  <tr>
+    <th>User need</th>
+    <th>Not a chat prompt — use app UI</th>
+  </tr>
+  <tr><td>Register / login</td><td>Login screen</td></tr>
+  <tr><td>View profile / height / weight</td><td>Profile tab</td></tr>
+  <tr><td>See workout history / pie chart</td><td>Profile tab</td></tr>
+  <tr><td>Clear history</td><td>Clear history button on profile</td></tr>
+  <tr><td>Upload avatar</td><td>Profile tab</td></tr>
+  <tr><td>Diet / injury / general knowledge</td><td>Trainer may reply in text only; no exercise plan from database</td></tr>
+</table>
+
+<h2>Quick reference — prompt type → outcome</h2>
+<table>
+  <tr>
+    <th>Prompt type</th>
+    <th>Example</th>
+    <th>Outcome</th>
+  </tr>
+  <tr><td>Greeting</td><td>Hi</td><td>Text reply only; asks for muscles</td></tr>
+  <tr><td>1 muscle, no count</td><td>Hamstring exercises</td><td>15 exercises + cards</td></tr>
+  <tr><td>1 muscle, with count</td><td>5 chest</td><td>N exercises + cards</td></tr>
+  <tr><td>2+ muscles, no counts</td><td>Chest and back</td><td>15 total split + cards</td></tr>
+  <tr><td>2+ muscles, with counts</td><td>5 chest and 3 back</td><td>Sum of counts + cards</td></tr>
+  <tr><td>With difficulty</td><td>Beginner shoulder workout</td><td>Filtered by level + cards</td></tr>
+  <tr><td>Named exercise</td><td>Barbell curls</td><td>0 or 1 card</td></tr>
+  <tr><td>Start / next / repeat / skip</td><td>Move to next exercise</td><td>Coaching text only</td></tr>
+  <tr><td>Finish</td><td>I'm done</td><td>Closing text; offer new plan</td></tr>
+</table>
+
+<p class="note">Save as PDF: open in browser → wait for diagrams to render → Ctrl+P → Save as PDF.</p>
+
+<script>
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: "neutral",
+    themeVariables: {
+      primaryColor: "#ffffff",
+      primaryTextColor: "#000000",
+      primaryBorderColor: "#000000",
+      lineColor: "#000000",
+      secondaryColor: "#ffffff",
+      tertiaryColor: "#ffffff",
+      fontFamily: "Arial, Helvetica, sans-serif"
+    }
+  });
+</script>
+</body>
+</html>
