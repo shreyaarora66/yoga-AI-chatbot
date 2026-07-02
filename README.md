@@ -1,5 +1,7 @@
 # AI Gym Trainer
 
+**Live demo:** https://web-production-a6883.up.railway.app/
+
 A voice-enabled chat app where an LLM agent (Google Gemini in the cloud, or a local
 Ollama model) acts as a personal trainer. It calls a RAG database of exercises as a
 tool, builds a workout plan, and returns each exercise with images and step-by-step
